@@ -5,6 +5,9 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+from solar_crm.db import query
+from solar_crm.engineering import calculate_complete_project, extract_datasheet_hints, generate_roof_croqui
+from solar_crm.records import create_pv_inverter, create_pv_module, create_sizing_project
 from solar_crm.sizing import (
     ENERGISA_PB_MONO_230,
     ENERGISA_PB_THREE_380_220,
@@ -105,7 +108,9 @@ st.warning(
     icon=":material/engineering:",
 )
 
-system_tab, strings_tab, circuits_tab, conduit_tab, energisa_tab, memorial_tab = st.tabs([
+project_tab, catalog_tab, system_tab, strings_tab, circuits_tab, conduit_tab, energisa_tab, memorial_tab = st.tabs([
+    ":material/architecture: Projeto completo",
+    ":material/inventory_2: Equipamentos",
     ":material/solar_power: Sistema FV",
     ":material/account_tree: Strings e inversor",
     ":material/electrical_services: Cabos e disjuntores",
@@ -113,6 +118,241 @@ system_tab, strings_tab, circuits_tab, conduit_tab, energisa_tab, memorial_tab =
     ":material/home_work: Energisa PB",
     ":material/description: Memorial",
 ])
+
+with catalog_tab:
+    st.subheader("Catálogo técnico", icon=":material/inventory_2:")
+    st.caption("Cadastre os valores de placa e anexe o datasheet original. A leitura local do PDF é apenas uma ajuda; confirme cada valor na tabela elétrica do fabricante.")
+    module_catalog, inverter_catalog = st.tabs(["Módulos", "Inversores"])
+    with module_catalog:
+        with st.form("new_pv_module"):
+            c1, c2 = st.columns(2)
+            module_manufacturer = c1.text_input("Fabricante do módulo")
+            module_model = c2.text_input("Modelo do módulo")
+            c1, c2, c3, c4 = st.columns(4)
+            module_power = c1.number_input("Potência Pmax (Wp)", min_value=1.0, value=585.0, step=5.0)
+            module_voc = c2.number_input("Voc (V)", min_value=0.1, value=52.1, step=0.1)
+            module_vmp = c3.number_input("Vmp (V)", min_value=0.1, value=44.0, step=0.1)
+            module_isc = c4.number_input("Isc (A)", min_value=0.1, value=14.3, step=0.1)
+            c1, c2, c3, c4 = st.columns(4)
+            module_imp = c1.number_input("Imp (A)", min_value=0.1, value=13.3, step=0.1)
+            module_voc_coeff = c2.number_input("Coef. Voc (%/°C)", min_value=-1.0, max_value=0.0, value=-0.25, step=0.01)
+            module_pmax_coeff = c3.number_input("Coef. Pmax/Vmp (%/°C)", min_value=-1.0, max_value=0.0, value=-0.35, step=0.01)
+            module_fuse = c4.number_input("Fusível máximo em série (A)", min_value=1.0, value=25.0, step=1.0)
+            c1, c2 = st.columns(2)
+            module_width = c1.number_input("Largura (mm)", min_value=100.0, value=1134.0, step=1.0)
+            module_height = c2.number_input("Altura (mm)", min_value=100.0, value=2278.0, step=1.0)
+            module_datasheet = st.file_uploader("Datasheet do módulo (PDF)", type=["pdf"], key="module_datasheet")
+            module_notes = st.text_area("Observações do módulo")
+            save_module = st.form_submit_button("Cadastrar módulo", type="primary", icon=":material/save:")
+        if module_datasheet:
+            hints = extract_datasheet_hints(module_datasheet.getvalue(), "module")
+            if hints:
+                st.info("Valores encontrados automaticamente no PDF — confirme antes de usar: " + ", ".join(f"{key}={value}" for key, value in hints.items()))
+        if save_module:
+            try:
+                create_pv_module({
+                    "manufacturer": module_manufacturer, "model": module_model,
+                    "power_wp": module_power, "voc_v": module_voc, "vmp_v": module_vmp,
+                    "isc_a": module_isc, "imp_a": module_imp,
+                    "temp_coeff_voc_pct": module_voc_coeff, "temp_coeff_pmax_pct": module_pmax_coeff,
+                    "max_series_fuse_a": module_fuse, "width_mm": module_width,
+                    "height_mm": module_height,
+                    "datasheet_name": module_datasheet.name if module_datasheet else None,
+                    "datasheet_mime": module_datasheet.type if module_datasheet else None,
+                    "notes": module_notes,
+                }, module_datasheet.getvalue() if module_datasheet else None)
+                st.success("Módulo cadastrado.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Não foi possível cadastrar o módulo: {exc}")
+
+        module_rows = query("SELECT id, manufacturer, model, power_wp, voc_v, vmp_v, isc_a, imp_a, max_series_fuse_a FROM pv_modules ORDER BY manufacturer, model")
+        if module_rows:
+            st.dataframe(pd.DataFrame(module_rows), hide_index=True)
+
+    with inverter_catalog:
+        with st.form("new_pv_inverter"):
+            c1, c2 = st.columns(2)
+            inverter_manufacturer = c1.text_input("Fabricante do inversor")
+            inverter_model = c2.text_input("Modelo do inversor")
+            c1, c2, c3 = st.columns(3)
+            inverter_power = c1.number_input("Potência nominal CA (kW)", min_value=0.1, value=6.0, step=0.5)
+            inverter_dc_power = c2.number_input("Potência CC máxima (kW)", min_value=0.1, value=9.0, step=0.5)
+            inverter_dc_voltage = c3.number_input("Tensão CC máxima (V)", min_value=50.0, value=600.0, step=10.0)
+            c1, c2, c3, c4 = st.columns(4)
+            inverter_mppt_min = c1.number_input("MPPT mínima (V)", min_value=1.0, value=80.0, step=10.0)
+            inverter_mppt_max = c2.number_input("MPPT máxima (V)", min_value=1.0, value=550.0, step=10.0)
+            inverter_mppts = c3.number_input("Quantidade de MPPTs", min_value=1, value=2, step=1)
+            inverter_strings_mppt = c4.number_input("Entradas por MPPT", min_value=1, value=1, step=1)
+            c1, c2, c3 = st.columns(3)
+            inverter_input_current = c1.number_input("Corrente máxima por MPPT (A)", min_value=0.1, value=32.0, step=1.0)
+            inverter_short_current = c2.number_input("Isc máxima por MPPT (A)", min_value=0.1, value=40.0, step=1.0)
+            inverter_efficiency = c3.number_input("Eficiência máxima (%)", min_value=50.0, max_value=100.0, value=98.0, step=0.1)
+            c1, c2 = st.columns(2)
+            inverter_phases = c1.selectbox("Sistema CA", ["Monofásico", "Trifásico"])
+            inverter_ac_voltage = c2.number_input("Tensão CA (V)", min_value=12.0, value=230.0, step=1.0)
+            inverter_datasheet = st.file_uploader("Datasheet do inversor (PDF)", type=["pdf"], key="inverter_datasheet")
+            inverter_notes = st.text_area("Observações do inversor")
+            save_inverter = st.form_submit_button("Cadastrar inversor", type="primary", icon=":material/save:")
+        if inverter_datasheet:
+            hints = extract_datasheet_hints(inverter_datasheet.getvalue(), "inverter")
+            if hints:
+                st.info("Valores encontrados automaticamente no PDF — confirme antes de usar: " + ", ".join(f"{key}={value}" for key, value in hints.items()))
+        if save_inverter:
+            try:
+                create_pv_inverter({
+                    "manufacturer": inverter_manufacturer, "model": inverter_model,
+                    "nominal_power_kw": inverter_power, "max_dc_power_kw": inverter_dc_power,
+                    "max_dc_voltage_v": inverter_dc_voltage, "mppt_min_v": inverter_mppt_min,
+                    "mppt_max_v": inverter_mppt_max, "mppt_count": inverter_mppts,
+                    "strings_per_mppt": inverter_strings_mppt,
+                    "max_input_current_mppt_a": inverter_input_current,
+                    "max_short_circuit_current_mppt_a": inverter_short_current,
+                    "ac_voltage_v": inverter_ac_voltage, "phases": inverter_phases,
+                    "efficiency_pct": inverter_efficiency,
+                    "datasheet_name": inverter_datasheet.name if inverter_datasheet else None,
+                    "datasheet_mime": inverter_datasheet.type if inverter_datasheet else None,
+                    "notes": inverter_notes,
+                }, inverter_datasheet.getvalue() if inverter_datasheet else None)
+                st.success("Inversor cadastrado.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Não foi possível cadastrar o inversor: {exc}")
+
+        inverter_rows = query("SELECT id, manufacturer, model, nominal_power_kw, max_dc_voltage_v, mppt_min_v, mppt_max_v, mppt_count, strings_per_mppt, max_input_current_mppt_a FROM pv_inverters ORDER BY manufacturer, model")
+        if inverter_rows:
+            st.dataframe(pd.DataFrame(inverter_rows), hide_index=True)
+
+with project_tab:
+    modules = query("""SELECT id, manufacturer, model, power_wp, voc_v, vmp_v, isc_a, imp_a,
+                              temp_coeff_voc_pct, temp_coeff_pmax_pct, max_series_fuse_a,
+                              width_mm, height_mm FROM pv_modules ORDER BY manufacturer, model""")
+    inverters = query("""SELECT id, manufacturer, model, nominal_power_kw, max_dc_power_kw,
+                                max_dc_voltage_v, mppt_min_v, mppt_max_v, mppt_count,
+                                strings_per_mppt, max_input_current_mppt_a,
+                                max_short_circuit_current_mppt_a, ac_voltage_v, phases,
+                                efficiency_pct FROM pv_inverters ORDER BY manufacturer, model""")
+    clients = query("SELECT id, name, address, city, state FROM clients WHERE status='Ativo' ORDER BY name")
+    if not modules or not inverters:
+        st.info("Cadastre pelo menos um módulo e um inversor na aba Equipamentos para iniciar o projeto completo.", icon=":material/info:")
+    else:
+        with st.form("complete_sizing_project"):
+            st.subheader("Identificação e equipamentos", icon=":material/solar_power:")
+            client_map = {"Projeto sem cliente vinculado": None}
+            client_map.update({row["name"]: row["id"] for row in clients})
+            module_map = {f"{row['manufacturer']} {row['model']} · {row['power_wp']:.0f} Wp": row for row in modules}
+            inverter_map = {f"{row['manufacturer']} {row['model']} · {row['nominal_power_kw']:.1f} kW": row for row in inverters}
+            c1, c2 = st.columns(2)
+            project_name = c1.text_input("Nome do projeto", placeholder="Ex.: Residência José da Silva")
+            project_client = c2.selectbox("Cliente", list(client_map))
+            project_address = st.text_input("Endereço da instalação")
+            c1, c2 = st.columns(2)
+            selected_module_label = c1.selectbox("Módulo", list(module_map))
+            selected_inverter_label = c2.selectbox("Inversor", list(inverter_map))
+
+            st.subheader("Arranjo e planta baixa", icon=":material/roofing:")
+            c1, c2, c3, c4 = st.columns(4)
+            project_module_count = c1.number_input("Quantidade de módulos", min_value=1, value=12, step=1)
+            project_modules_string = c2.number_input("Módulos por string preferidos", min_value=1, value=6, step=1)
+            layout_rows = c3.number_input("Linhas no croqui", min_value=1, value=2, step=1)
+            layout_columns = c4.number_input("Colunas no croqui", min_value=1, value=6, step=1)
+            c1, c2, c3, c4 = st.columns(4)
+            orientation = c1.selectbox("Orientação dos módulos", ["Retrato", "Paisagem"])
+            roof_type = c2.selectbox("Tipo de cobertura", ["Cerâmica", "Fibrocimento", "Metálica", "Laje", "Solo", "Outro"])
+            azimuth = c3.number_input("Azimute (graus)", min_value=0.0, max_value=359.0, value=0.0, step=1.0)
+            tilt = c4.number_input("Inclinação (graus)", min_value=0.0, max_value=90.0, value=15.0, step=1.0)
+            roof_photo = st.file_uploader("Foto aérea, telhado ou planta para fundo do croqui", type=["png", "jpg", "jpeg"])
+
+            st.subheader("Condições elétricas", icon=":material/electrical_services:")
+            c1, c2, c3, c4 = st.columns(4)
+            minimum_temperature = c1.number_input("Temperatura mínima (°C)", min_value=-20.0, max_value=40.0, value=12.0, step=1.0)
+            maximum_cell_temperature = c2.number_input("Temperatura máxima da célula (°C)", min_value=25.0, max_value=90.0, value=70.0, step=1.0)
+            dc_length = c3.number_input("Trecho CC unidirecional (m)", min_value=0.0, value=20.0, step=1.0)
+            ac_length = c4.number_input("Trecho CA unidirecional (m)", min_value=0.0, value=15.0, step=1.0)
+            c1, c2 = st.columns(2)
+            drop_limit = c1.number_input("Queda máxima por trecho (%)", min_value=0.1, max_value=5.0, value=1.5, step=0.1)
+            correction_factor = c2.number_input("Fator de correção combinado", min_value=0.1, max_value=1.0, value=0.8, step=0.05)
+            has_spda = st.checkbox("Edificação com SPDA externo ou condição que exija DPS Tipo 1+2")
+            project_notes = st.text_area("Observações do levantamento")
+            calculate_complete = st.form_submit_button("Calcular projeto e gerar croqui", type="primary", icon=":material/calculate:")
+
+        if calculate_complete:
+            selected_module = module_map[selected_module_label]
+            selected_inverter = inverter_map[selected_inverter_label]
+            project_values = {
+                "name": project_name,
+                "client_id": client_map[project_client],
+                "address": project_address,
+                "module_id": selected_module["id"],
+                "inverter_id": selected_inverter["id"],
+                "module_count": project_module_count,
+                "modules_per_string": project_modules_string,
+                "layout_rows": layout_rows,
+                "layout_columns": layout_columns,
+                "module_orientation": orientation,
+                "roof_type": roof_type,
+                "roof_azimuth_deg": azimuth,
+                "roof_tilt_deg": tilt,
+                "minimum_temperature_c": minimum_temperature,
+                "maximum_cell_temperature_c": maximum_cell_temperature,
+                "dc_cable_length_m": dc_length,
+                "ac_cable_length_m": ac_length,
+                "voltage_drop_limit_pct": drop_limit,
+                "correction_factor": correction_factor,
+                "has_external_spda": has_spda,
+                "roof_image_name": roof_photo.name if roof_photo else None,
+                "roof_image_mime": roof_photo.type if roof_photo else None,
+                "notes": project_notes,
+                "status": "Rascunho",
+            }
+            try:
+                complete_result = calculate_complete_project(selected_module, selected_inverter, project_values)
+                croqui = generate_roof_croqui(project_values, selected_module, selected_inverter, complete_result, roof_photo.getvalue() if roof_photo else None)
+                st.session_state["complete_sizing"] = {
+                    "values": project_values, "module": selected_module,
+                    "inverter": selected_inverter, "result": complete_result,
+                    "roof_image": roof_photo.getvalue() if roof_photo else None,
+                    "croqui": croqui,
+                }
+            except ValueError as exc:
+                st.error(str(exc))
+
+        complete = st.session_state.get("complete_sizing")
+        if complete:
+            result = complete["result"]
+            with st.container(horizontal=True):
+                st.metric("Potência instalada", f"{decimal(result['installed_kwp'], 3)} kWp", border=True)
+                st.metric("Relação CC/CA", decimal(result["dc_ac_ratio"]), border=True)
+                st.metric("Strings", result["string_count"], border=True)
+                st.metric("Cabo CC", f"{decimal(result['dc_cable']['section_mm2'], 1)} mm²", border=True)
+                st.metric("Cabo CA", f"{decimal(result['ac_cable']['section_mm2'], 1)} mm²", border=True)
+                st.metric("Disjuntor CA", f"{result['ac_breaker_a'] or '-'} A", border=True)
+            protection_rows = [
+                {"Item": "Strings", "Dimensionamento": " | ".join(f"S{i + 1}: {value} módulos" for i, value in enumerate(result["string_lengths"]))},
+                {"Item": "Faixa permitida", "Dimensionamento": f"{result['minimum_modules_series']} a {result['maximum_modules_series']} módulos por string"},
+                {"Item": "Tensões críticas", "Dimensionamento": f"Voc frio {decimal(result['cold_voc_v'])} V | Vmp quente {decimal(result['hot_vmp_v'])} V"},
+                {"Item": "Proteção CC", "Dimensionamento": f"Fusível gPV {result['string_fuse_a'] or '-'} A | Seccionador {result['dc_switch_a'] or '-'} A | DPS {result['dc_spd_type']} Ucpv {result['dc_spd_ucpv_v'] or '-'} V"},
+                {"Item": "Saída CA", "Dimensionamento": f"Ib {decimal(result['ac_current_a'])} A | Cabo {decimal(result['ac_cable']['section_mm2'], 1)} mm² | Disjuntor {result['ac_breaker_a'] or '-'} A | DPS {result['ac_spd_type']} Uc {result['ac_spd_uc_v']} V"},
+            ]
+            st.dataframe(pd.DataFrame(protection_rows), hide_index=True)
+            for warning in result["warnings"]:
+                st.warning(warning, icon=":material/warning:")
+            st.image(complete["croqui"], caption="Croqui esquemático de vista superior e divisão por strings")
+            with st.container(horizontal=True):
+                st.download_button("Baixar croqui em PNG", complete["croqui"], file_name="solaros-croqui-strings.png", mime="image/png", icon=":material/download:")
+                if st.button("Salvar projeto", type="primary", icon=":material/save:"):
+                    try:
+                        project_id = create_sizing_project(complete["values"], result, complete["roof_image"])
+                        st.success(f"Projeto DIM salvo com o identificador {project_id}.")
+                    except ValueError as exc:
+                        st.error(str(exc))
+
+    saved_projects = query("""SELECT sp.number, sp.name, c.name AS client_name, sp.module_count,
+                                     sp.status, sp.created_at FROM sizing_projects sp
+                              LEFT JOIN clients c ON c.id=sp.client_id ORDER BY sp.created_at DESC""")
+    if saved_projects:
+        st.subheader("Projetos salvos", icon=":material/history:")
+        st.dataframe(pd.DataFrame(saved_projects), hide_index=True)
 
 with system_tab:
     left, right = st.columns([1.05, 0.95])

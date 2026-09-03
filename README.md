@@ -23,6 +23,9 @@ Sistema profissional para estruturar o pós-venda e o pré-dimensionamento de pr
 - Banco SQLite local ou PostgreSQL em nuvem e download de backup local.
 - Login individual por e-mail e senha usando autenticação OIDC, com lista de usuários autorizados.
 - Área de engenharia para pré-dimensionar sistema FV, strings, inversor, cabos CC/CA, disjuntores e eletrodutos.
+- Catálogo técnico de módulos e inversores com anexo dos datasheets e leitura local assistida de parâmetros em PDFs textuais.
+- Projeto fotovoltaico completo com distribuição balanceada por strings/MPPT, cabos CC e CA, fusível gPV, seccionamento, DPS e croqui sobre foto da cobertura.
+- Propostas comerciais em PDF para consultoria, projeto, manutenção e pós-venda, com histórico, status, assinatura técnica e identidade visual OnGrid Energia Solar.
 - Consulta guiada ao padrão de entrada residencial da Energisa PB, com referência às tabelas da NDU 001.
 - Memorial de pré-dimensionamento para download.
 - Caixa gerencial com receitas, despesas, faturamento de manutenção, contas a receber/pagar e fluxo mensal.

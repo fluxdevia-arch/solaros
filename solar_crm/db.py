@@ -416,6 +416,106 @@ CREATE TABLE IF NOT EXISTS service_contracts (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS pv_modules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    manufacturer TEXT,
+    model TEXT NOT NULL,
+    power_wp REAL NOT NULL,
+    voc_v REAL NOT NULL,
+    vmp_v REAL NOT NULL,
+    isc_a REAL NOT NULL,
+    imp_a REAL NOT NULL,
+    temp_coeff_voc_pct REAL NOT NULL DEFAULT -0.25,
+    temp_coeff_pmax_pct REAL NOT NULL DEFAULT -0.35,
+    max_series_fuse_a REAL NOT NULL DEFAULT 25,
+    width_mm REAL NOT NULL DEFAULT 1134,
+    height_mm REAL NOT NULL DEFAULT 2278,
+    datasheet_name TEXT,
+    datasheet_mime TEXT,
+    datasheet_data BLOB,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(manufacturer, model)
+);
+
+CREATE TABLE IF NOT EXISTS pv_inverters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    manufacturer TEXT,
+    model TEXT NOT NULL,
+    nominal_power_kw REAL NOT NULL,
+    max_dc_power_kw REAL NOT NULL,
+    max_dc_voltage_v REAL NOT NULL,
+    mppt_min_v REAL NOT NULL,
+    mppt_max_v REAL NOT NULL,
+    mppt_count INTEGER NOT NULL DEFAULT 1,
+    strings_per_mppt INTEGER NOT NULL DEFAULT 1,
+    max_input_current_mppt_a REAL NOT NULL,
+    max_short_circuit_current_mppt_a REAL NOT NULL,
+    ac_voltage_v REAL NOT NULL DEFAULT 230,
+    phases TEXT NOT NULL DEFAULT 'Monofásico',
+    efficiency_pct REAL NOT NULL DEFAULT 98,
+    datasheet_name TEXT,
+    datasheet_mime TEXT,
+    datasheet_data BLOB,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(manufacturer, model)
+);
+
+CREATE TABLE IF NOT EXISTS sizing_projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    number TEXT UNIQUE,
+    client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    address TEXT,
+    module_id INTEGER NOT NULL REFERENCES pv_modules(id),
+    inverter_id INTEGER NOT NULL REFERENCES pv_inverters(id),
+    module_count INTEGER NOT NULL,
+    modules_per_string INTEGER NOT NULL,
+    layout_rows INTEGER NOT NULL,
+    layout_columns INTEGER NOT NULL,
+    module_orientation TEXT NOT NULL DEFAULT 'Retrato',
+    roof_type TEXT,
+    roof_azimuth_deg REAL NOT NULL DEFAULT 0,
+    roof_tilt_deg REAL NOT NULL DEFAULT 0,
+    minimum_temperature_c REAL NOT NULL DEFAULT 12,
+    maximum_cell_temperature_c REAL NOT NULL DEFAULT 70,
+    dc_cable_length_m REAL NOT NULL DEFAULT 20,
+    ac_cable_length_m REAL NOT NULL DEFAULT 15,
+    voltage_drop_limit_pct REAL NOT NULL DEFAULT 1.5,
+    correction_factor REAL NOT NULL DEFAULT 0.8,
+    has_external_spda INTEGER NOT NULL DEFAULT 0,
+    roof_image_name TEXT,
+    roof_image_mime TEXT,
+    roof_image_data BLOB,
+    result_json TEXT NOT NULL,
+    notes TEXT,
+    status TEXT NOT NULL DEFAULT 'Rascunho',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    number TEXT UNIQUE,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    opportunity_id INTEGER REFERENCES opportunities(id) ON DELETE SET NULL,
+    title TEXT NOT NULL,
+    service_type TEXT NOT NULL,
+    issue_date TEXT NOT NULL,
+    valid_until TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0,
+    payment_terms TEXT,
+    scope TEXT NOT NULL,
+    deliverables TEXT,
+    exclusions TEXT,
+    deadline_days INTEGER NOT NULL DEFAULT 15,
+    status TEXT NOT NULL DEFAULT 'Rascunho',
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_plants_client ON plants(client_id);
 CREATE INDEX IF NOT EXISTS idx_readings_month ON readings(reference_month);
 CREATE INDEX IF NOT EXISTS idx_beneficiaries_plant ON beneficiaries(plant_id, status);
@@ -432,6 +532,9 @@ CREATE INDEX IF NOT EXISTS idx_opportunities_stage ON opportunities(stage, next_
 CREATE INDEX IF NOT EXISTS idx_service_orders_status ON service_orders(status, scheduled_date);
 CREATE INDEX IF NOT EXISTS idx_service_orders_token ON service_orders(public_token);
 CREATE INDEX IF NOT EXISTS idx_service_contracts_client ON service_contracts(client_id, status);
+CREATE INDEX IF NOT EXISTS idx_sizing_projects_client ON sizing_projects(client_id, status);
+CREATE INDEX IF NOT EXISTS idx_proposals_client ON proposals(client_id, status);
+CREATE INDEX IF NOT EXISTS idx_proposals_opportunity ON proposals(opportunity_id);
 """
 
 
@@ -758,6 +861,10 @@ def clear_business_data() -> None:
     """Remove demo/operational records while preserving company settings."""
     conn = connect()
     try:
+        conn.execute("DELETE FROM sizing_projects")
+        conn.execute("DELETE FROM pv_modules")
+        conn.execute("DELETE FROM pv_inverters")
+        conn.execute("DELETE FROM proposals")
         conn.execute("DELETE FROM opportunities")
         conn.execute("DELETE FROM service_orders")
         conn.execute("DELETE FROM service_contracts")

@@ -46,6 +46,7 @@ pages = {
     ],
     "Comercial": [
         st.Page("app_pages/pipeline.py", title="Kanban comercial", icon=":material/view_kanban:"),
+        st.Page("app_pages/proposals.py", title="Propostas", icon=":material/request_quote:"),
         st.Page("app_pages/cash.py", title="Caixa", icon=":material/point_of_sale:"),
         st.Page("app_pages/pricing.py", title="Precificação", icon=":material/calculate:"),
         st.Page("app_pages/service_contracts.py", title="Contratos de serviço", icon=":material/description:"),
@@ -57,7 +58,7 @@ page = st.navigation(pages, position="sidebar")
 
 with st.sidebar:
     st.markdown("### :material/wb_sunny: SolarOS")
-    st.caption("Operação, pós-venda e engenharia solar · v1.8")
+    st.caption("Operação, pós-venda e engenharia solar · v1.9")
     st.caption("Banco em nuvem" if using_postgres() else "Banco local")
     st.divider()
     render_user_sidebar(authenticated)
