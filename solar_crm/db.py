@@ -541,6 +541,11 @@ CREATE INDEX IF NOT EXISTS idx_proposals_opportunity ON proposals(opportunity_id
 def init_db(seed: bool = True) -> None:
     conn = connect()
     try:
+        if getattr(conn, "is_postgres", False):
+            # Streamlit can start more than one session while a deployment is warming up.
+            # Serialize DDL so concurrent CREATE TABLE IF NOT EXISTS statements do not
+            # race while PostgreSQL creates their implicit composite types.
+            conn.execute("SELECT pg_advisory_xact_lock(1397705807)")
         conn.executescript(SCHEMA)
         _ensure_schema_columns(conn)
         count_row = conn.execute("SELECT COUNT(*) AS value FROM settings").fetchone()
@@ -820,7 +825,14 @@ def query_one(sql: str, params: Iterable[Any] = ()) -> dict[str, Any] | None:
 
 def query_df(sql: str, params: Iterable[Any] = ()) -> pd.DataFrame:
     if using_postgres():
-        return pd.DataFrame(query(sql, params))
+        conn = connect()
+        try:
+            cursor = conn.execute(sql, tuple(params))
+            rows = cursor.fetchall()
+            columns = [column.name for column in (cursor.description or [])]
+            return pd.DataFrame([dict(row) for row in rows], columns=columns)
+        finally:
+            conn.close()
     conn = connect()
     try:
         return pd.read_sql_query(sql, conn, params=tuple(params))

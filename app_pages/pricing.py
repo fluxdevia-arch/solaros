@@ -82,11 +82,16 @@ with simulator:
 
 with portfolio:
     contracts = query(
-        """SELECT c.*, cl.name AS client_name, COUNT(p.id) AS plant_count,
-                  COALESCE(SUM(p.installed_kwp),0) AS total_kwp
+        """SELECT c.*, cl.name AS client_name,
+                  COALESCE(p.plant_count, 0) AS plant_count,
+                  COALESCE(p.total_kwp, 0) AS total_kwp
            FROM contracts c JOIN clients cl ON cl.id=c.client_id
-           LEFT JOIN plants p ON p.client_id=c.client_id
-           WHERE c.status='Ativo' GROUP BY c.id ORDER BY cl.name"""
+           LEFT JOIN (
+               SELECT client_id, COUNT(*) AS plant_count,
+                      COALESCE(SUM(installed_kwp), 0) AS total_kwp
+               FROM plants GROUP BY client_id
+           ) p ON p.client_id=c.client_id
+           WHERE c.status='Ativo' ORDER BY cl.name"""
     )
     rows = []
     for contract in contracts:
