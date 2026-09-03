@@ -1,0 +1,8 @@
+streamlit[auth]>=1.63.0
+pandas>=3.0.0
+altair>=6.0.0
+reportlab>=5.0.0
+pillow>=12.0.0
+requests>=2.34.0
+psycopg[binary]>=3.2.0
+cryptography>=45.0.0

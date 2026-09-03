@@ -1,0 +1,13 @@
+.venv/
+.uv-cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.streamlit/secrets.toml
+.streamlit/secrets.*.toml
+!.streamlit/secrets.toml.example
+data/*.db
+data/*.sqlite*
+tmp/
+logs/*.log
+output/

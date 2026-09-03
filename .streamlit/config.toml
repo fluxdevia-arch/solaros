@@ -1,0 +1,43 @@
+[client]
+toolbarMode = "minimal"
+
+[server]
+headless = true
+runOnSave = true
+
+[theme]
+base = "light"
+primaryColor = "#0B7A53"
+backgroundColor = "#F7FAF8"
+secondaryBackgroundColor = "#EDF4F0"
+textColor = "#17231D"
+linkColor = "#0B7A53"
+borderColor = "#CDDCD4"
+dataframeBorderColor = "#CDDCD4"
+dataframeHeaderBackgroundColor = "#E4EFE9"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "8px"
+buttonRadius = "8px"
+font = "sans-serif"
+headingFont = "sans-serif"
+baseFontSize = 15
+headingFontSizes = ["32px", "24px", "20px", "17px", "15px", "13px"]
+headingFontWeights = [700, 650, 600, 600, 600, 600]
+linkUnderline = false
+greenColor = "#0B7A53"
+redColor = "#C43D3D"
+orangeColor = "#B86614"
+yellowColor = "#B08B13"
+blueColor = "#2F6F9F"
+violetColor = "#7551A8"
+grayColor = "#65736B"
+chartCategoricalColors = ["#0B7A53", "#E3A72F", "#2F6F9F", "#7551A8", "#C43D3D", "#54A37D", "#65736B"]
+chartSequentialColors = ["#EEF8F2", "#D8EEE0", "#BCE1CA", "#98D0AE", "#73BC91", "#50A778", "#319060", "#1B794D", "#0E603C", "#06472D"]
+
+[theme.sidebar]
+backgroundColor = "#10271E"
+secondaryBackgroundColor = "#19372A"
+textColor = "#F1F7F3"
+borderColor = "#2E4B3D"
+primaryColor = "#5CD39D"
