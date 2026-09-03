@@ -6,14 +6,14 @@ Arquitetura preparada:
 - **Login:** Auth0 Universal Login por e-mail e senha (OIDC).
 - **Banco:** PostgreSQL do Supabase.
 
-O código continua funcionando localmente com SQLite. Quando `DATABASE_URL` é
-configurada nos segredos, ele cria e usa automaticamente o banco PostgreSQL.
+O código continua funcionando localmente com SQLite. Quando a seção `[database]`
+é configurada nos segredos, ele cria e usa automaticamente o banco PostgreSQL.
 
 ## 1. Criar o banco no Supabase
 
 1. Crie uma conta gratuita em <https://supabase.com> e um projeto chamado `solaros`.
 2. Em **Connect**, selecione a conexão **Session pooler** na porta `5432`.
-3. Copie a URI PostgreSQL e acrescente `?sslmode=require` se ainda não existir.
+3. Anote host, porta e usuário exibidos na conexão.
 4. Guarde a senha do banco. Ela será usada somente nos segredos do Streamlit.
 
 O plano gratuito pode pausar projetos com pouca atividade após sete dias. O
@@ -39,9 +39,9 @@ O `server_metadata_url` será:
 
 ## 3. Publicar o código no GitHub
 
-Use um repositório **privado** para não expor o código operacional. Não inclua
-`.streamlit/secrets.toml`, arquivos `.db` ou chaves. O `.gitignore` do projeto já
-protege esses arquivos.
+No plano gratuito atual do Streamlit Community Cloud, o repositório da aplicação
+precisa ser público. Não inclua `.streamlit/secrets.toml`, arquivos `.db`, PDFs,
+assinaturas ou chaves. O `.gitignore` do projeto já protege esses arquivos.
 
 ## 4. Implantar no Streamlit Community Cloud
 

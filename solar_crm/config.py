@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import quote
 
 
 def _streamlit_secret(section: str, key: str) -> Any | None:
@@ -28,7 +29,23 @@ def database_url() -> str:
     environment_value = os.getenv("DATABASE_URL", "").strip()
     if environment_value:
         return environment_value
-    return str(_streamlit_secret("database", "url") or "").strip()
+    configured_url = str(_streamlit_secret("database", "url") or "").strip()
+    if configured_url:
+        return configured_url
+
+    host = str(_streamlit_secret("database", "host") or "").strip()
+    user = str(_streamlit_secret("database", "user") or "").strip()
+    password = str(_streamlit_secret("database", "password") or "")
+    name = str(_streamlit_secret("database", "name") or "postgres").strip()
+    port = str(_streamlit_secret("database", "port") or "5432").strip()
+    sslmode = str(_streamlit_secret("database", "sslmode") or "require").strip()
+    if not (host and user and password):
+        return ""
+
+    return (
+        f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@"
+        f"{host}:{port}/{quote(name, safe='')}?sslmode={quote(sslmode, safe='')}"
+    )
 
 
 def encryption_key() -> str:
