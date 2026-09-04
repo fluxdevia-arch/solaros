@@ -16,6 +16,7 @@ from solar_crm.inspections import (
     add_inspection_photo,
     completion_score,
     create_inspection,
+    ensure_inspection_schema,
     inspection_by_token,
     inspection_details,
     inspection_items,
@@ -37,6 +38,8 @@ INSPECTION_TYPES = [
 WEATHER_OPTIONS = ["Ensolarado", "Parcialmente nublado", "Nublado", "Chuva", "Não informado"]
 ORIENTATIONS = ["Norte", "Nordeste", "Leste", "Sudeste", "Sul", "Sudoeste", "Oeste", "Noroeste", "Múltiplas águas", "Não medido"]
 PHOTO_CATEGORIES = ["Vista geral", "Módulos", "Cobertura e estrutura", "Inversor", "Quadros e proteções", "Cabos e conectores", "Aterramento", "Falha encontrada", "Serviço executado", "Outras evidências"]
+
+ensure_inspection_schema()
 
 
 def _date_value(value: object, fallback: date | None = None) -> date:
@@ -356,4 +359,3 @@ if inspections:
         _show_saved_photos(selected["id"])
 else:
     st.info("Nenhuma vistoria cadastrada. Crie a primeira ficha para enviar à equipe de campo.", icon=":material/info:")
-

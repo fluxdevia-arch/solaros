@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 from PIL import Image, ImageOps
 
-from solar_crm.db import execute, execute_many, now_iso, query, query_one
+from solar_crm.db import connect, execute, execute_many, now_iso, query, query_one
 
 
 INSPECTION_STATUSES = ["Rascunho", "Em andamento", "Concluída", "Requer retorno"]
@@ -35,8 +35,88 @@ DEFAULT_CHECKLIST = [
     ("Monitoramento e desempenho", "Geração instantânea e comparação com o esperado"),
 ]
 
+INSPECTION_SCHEMA = """
+CREATE TABLE IF NOT EXISTS site_inspections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    number TEXT UNIQUE,
+    public_token TEXT NOT NULL UNIQUE,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    plant_id INTEGER REFERENCES plants(id) ON DELETE SET NULL,
+    service_order_id INTEGER REFERENCES service_orders(id) ON DELETE SET NULL,
+    inspection_type TEXT NOT NULL DEFAULT 'Vistoria técnica',
+    status TEXT NOT NULL DEFAULT 'Rascunho',
+    urgency TEXT NOT NULL DEFAULT 'Rotina',
+    inspected_at TEXT NOT NULL,
+    technician TEXT, contact_name TEXT, contact_phone TEXT, address TEXT NOT NULL,
+    weather TEXT, ambient_temperature_c REAL, roof_type TEXT, roof_condition TEXT,
+    access_condition TEXT, latitude REAL, longitude REAL, solar_orientation TEXT,
+    azimuth_deg REAL, tilt_deg REAL, shading_level TEXT, shading_sources TEXT,
+    dc_voltage_v REAL, dc_current_a REAL, ac_voltage_v REAL, ac_current_a REAL,
+    insulation_mohm REAL, grounding_ohm REAL, generation_power_kw REAL,
+    inverter_alarms TEXT, safety_risks TEXT, findings TEXT, actions_performed TEXT,
+    recommendations TEXT, materials_needed TEXT, follow_up_date TEXT,
+    client_acknowledgement TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS inspection_checklist_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inspection_id INTEGER NOT NULL REFERENCES site_inspections(id) ON DELETE CASCADE,
+    category TEXT NOT NULL, item TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Não verificado', notes TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(inspection_id, item)
+);
+CREATE TABLE IF NOT EXISTS inspection_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inspection_id INTEGER NOT NULL REFERENCES site_inspections(id) ON DELETE CASCADE,
+    category TEXT NOT NULL, caption TEXT, filename TEXT,
+    mime_type TEXT NOT NULL, image_data BLOB NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_site_inspections_status ON site_inspections(status, inspected_at);
+CREATE INDEX IF NOT EXISTS idx_site_inspections_token ON site_inspections(public_token);
+CREATE INDEX IF NOT EXISTS idx_inspection_items_inspection ON inspection_checklist_items(inspection_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_inspection_photos_inspection ON inspection_photos(inspection_id, created_at);
+"""
+
+_inspection_schema_ready = False
+
+
+def ensure_inspection_schema() -> None:
+    """Create the field tables even during a Streamlit hot deployment.
+
+    Streamlit may reload a new page before re-importing the central database
+    module. Keeping this idempotent migration beside the feature prevents a
+    brief mixed-version process from reaching missing PostgreSQL tables.
+    """
+    global _inspection_schema_ready
+    if _inspection_schema_ready:
+        return
+    conn = connect()
+    try:
+        if getattr(conn, "is_postgres", False):
+            conn.execute("SELECT pg_advisory_xact_lock(1397705807)")
+            postgres_schema = (
+                INSPECTION_SCHEMA
+                .replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+                .replace(" REAL", " DOUBLE PRECISION")
+                .replace(" BLOB", " BYTEA")
+                .replace("DEFAULT CURRENT_TIMESTAMP", "DEFAULT (CURRENT_TIMESTAMP::TEXT)")
+            )
+            for statement in postgres_schema.split(";"):
+                if statement.strip():
+                    conn.execute(statement)
+        else:
+            conn.executescript(INSPECTION_SCHEMA)
+        conn.commit()
+        _inspection_schema_ready = True
+    finally:
+        conn.close()
+
 
 def create_inspection(values: dict) -> int:
+    ensure_inspection_schema()
     address = str(values.get("address") or "").strip()
     if not values.get("client_id") or not address:
         raise ValueError("Informe o cliente e o endereço da vistoria.")
