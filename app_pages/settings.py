@@ -1,6 +1,7 @@
 import streamlit as st
 
 from solar_crm.db import clear_business_data, execute, get_db_path, query_one, using_postgres
+from solar_crm.document_cache import clear_document_caches
 from solar_crm.signature import normalize_signature_image
 from solar_crm.ui import flash, page_intro, show_flash
 
@@ -57,6 +58,7 @@ with left:
                             share_base_url, footer,
                         ),
                     )
+                    clear_document_caches()
                     flash("Configurações e assinatura salvas.")
                     st.rerun()
                 except ValueError as exc:
@@ -93,7 +95,7 @@ with right:
     with st.container(border=True):
         st.subheader("Sobre esta versão", icon=":material/info:")
         st.markdown("""
-        **SolarOS v1.8**
+        **SolarOS v2.1**
 
         - CRM de clientes e usinas
         - Contratos e receita recorrente

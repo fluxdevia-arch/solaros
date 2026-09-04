@@ -26,3 +26,10 @@ def service_order_pdf(order_id: int, document_version: str) -> bytes:
 def service_contract_pdf(contract_id: int, document_version: str) -> bytes:
     return generate_service_contract_pdf(contract_id)
 
+
+def clear_document_caches() -> None:
+    """Invalidate branded documents after company identity changes."""
+    inspection_pdf.clear()
+    proposal_pdf.clear()
+    service_order_pdf.clear()
+    service_contract_pdf.clear()
