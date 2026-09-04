@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from solar_crm.db import query, query_df, query_one
-from solar_crm.service_documents import generate_service_order_pdf
+from solar_crm.document_cache import service_order_pdf
 from solar_crm.ui import date_br, flash, page_intro, show_flash
 from solar_crm.workflow import (
     SERVICE_ORDER_STATUSES,
@@ -62,7 +62,7 @@ if token:
             st.rerun()
     st.download_button(
         "Baixar ordem de serviço em PDF",
-        generate_service_order_pdf(order["id"]),
+        service_order_pdf(order["id"], str(order.get("updated_at") or "")),
         file_name=f"{order['number'].lower()}.pdf",
         mime="application/pdf",
         icon=":material/download:",
@@ -160,7 +160,7 @@ if orders:
         with st.container(horizontal=True):
             st.download_button(
                 "Baixar PDF para imprimir",
-                generate_service_order_pdf(selected_order["id"]),
+                service_order_pdf(selected_order["id"], str(selected_order.get("updated_at") or "")),
                 file_name=f"{selected_order['number'].lower()}.pdf",
                 mime="application/pdf",
                 icon=":material/download:",

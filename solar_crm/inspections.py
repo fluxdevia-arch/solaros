@@ -257,12 +257,14 @@ def add_inspection_photo(
     if total and int(total["value"]) >= 20:
         raise ValueError("Esta vistoria já possui o limite de 20 fotos.")
     compressed, mime_type = compress_photo(image_bytes)
-    return execute(
+    photo_id = execute(
         """INSERT INTO inspection_photos
            (inspection_id, category, caption, filename, mime_type, image_data)
            VALUES (?, ?, ?, ?, ?, ?)""",
         (inspection_id, category or "Outras evidências", caption.strip(), filename, mime_type, compressed),
     )
+    execute("UPDATE site_inspections SET updated_at=? WHERE id=?", (now_iso(), inspection_id))
+    return photo_id
 
 
 def inspection_items(inspection_id: int) -> list[dict]:

@@ -34,6 +34,17 @@ class DatabaseConfigurationTests(unittest.TestCase):
             "pooler.example.com:5432/postgres?sslmode=require",
         )
 
+    def test_postgres_schema_translates_the_received_migration(self):
+        from solar_crm.db import _postgres_schema
+
+        migration = "CREATE TABLE sample (id INTEGER PRIMARY KEY AUTOINCREMENT, value REAL, photo BLOB);"
+        translated = _postgres_schema(migration)
+
+        self.assertIn("BIGSERIAL PRIMARY KEY", translated)
+        self.assertIn("DOUBLE PRECISION", translated)
+        self.assertIn("BYTEA", translated)
+        self.assertIn("CREATE TABLE sample", translated)
+
 
 if __name__ == "__main__":
     unittest.main()

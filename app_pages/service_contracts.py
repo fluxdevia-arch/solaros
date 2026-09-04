@@ -5,7 +5,7 @@ import streamlit as st
 
 from solar_crm.calculations import money
 from solar_crm.db import query
-from solar_crm.service_documents import generate_service_contract_pdf
+from solar_crm.document_cache import service_contract_pdf
 from solar_crm.ui import date_br, flash, page_intro, show_flash
 from solar_crm.workflow import CONTRACT_STATUSES, create_service_contract, update_contract_status
 
@@ -108,7 +108,7 @@ if contracts:
         st.caption(f"{money(selected['amount'])} · cobrança {selected['billing_cycle'].lower()} · status {selected['status']}")
         st.download_button(
             "Baixar contrato em PDF",
-            generate_service_contract_pdf(selected["id"]),
+            service_contract_pdf(selected["id"], str(selected.get("updated_at") or "")),
             file_name=f"{selected['number'].lower()}.pdf",
             mime="application/pdf",
             icon=":material/download:",

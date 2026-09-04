@@ -2,7 +2,7 @@ import streamlit as st
 
 from solar_crm.auth import render_user_sidebar, require_login
 from solar_crm.config import seed_demo_data
-from solar_crm.db import init_db, using_postgres
+from solar_crm.db import SCHEMA_VERSION, database_cache_key, init_db, using_postgres
 
 st.set_page_config(
     page_title="SolarOS · Gestão solar",
@@ -16,7 +16,15 @@ field_inspection_mode = bool(str(st.query_params.get("inspection") or "").strip(
 field_mode = field_order_mode or field_inspection_mode
 authenticated = False if field_mode else require_login()
 
-init_db(seed=seed_demo_data())
+
+@st.cache_resource(show_spinner=False)
+def prepare_database(schema_version: int, seed: bool, database_identity: str) -> int:
+    """Initialize tables once per process and again whenever the schema changes."""
+    init_db(seed=seed)
+    return schema_version
+
+
+prepare_database(SCHEMA_VERSION, seed_demo_data(), database_cache_key())
 
 st.session_state.setdefault("selected_client_id", None)
 st.session_state.setdefault("selected_plant_id", None)
@@ -70,7 +78,7 @@ page = st.navigation(pages, position="sidebar")
 
 with st.sidebar:
     st.markdown("### :material/wb_sunny: SolarOS")
-    st.caption("Operação, pós-venda e engenharia solar · v2.0")
+    st.caption("Operação, pós-venda e engenharia solar · v2.1")
     st.caption("Banco em nuvem" if using_postgres() else "Banco local")
     st.divider()
     render_user_sidebar(authenticated)

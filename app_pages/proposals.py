@@ -5,7 +5,7 @@ import streamlit as st
 
 from solar_crm.calculations import money
 from solar_crm.db import query
-from solar_crm.proposal_documents import generate_proposal_pdf
+from solar_crm.document_cache import proposal_pdf
 from solar_crm.records import PROPOSAL_STATUSES, create_proposal, update_proposal_status
 from solar_crm.ui import date_br, flash, page_intro, show_flash
 
@@ -145,7 +145,7 @@ with history_tab:
             st.caption(f"{money(selected['amount'])} · válida até {date_br(selected['valid_until'])} · {selected['status']}")
             st.download_button(
                 "Baixar proposta OnGrid em PDF",
-                generate_proposal_pdf(selected["id"]),
+                proposal_pdf(selected["id"], str(selected.get("updated_at") or "")),
                 file_name=f"{selected['number'].lower()}-ongrid.pdf",
                 mime="application/pdf",
                 type="primary",

@@ -5,12 +5,14 @@ import pandas as pd
 import streamlit as st
 
 from solar_crm.calculations import money, number_br, percent
-from solar_crm.db import available_months, dashboard_metrics, query_df
+from solar_crm.data_cache import dashboard_frame, dashboard_months, dashboard_summary
+from solar_crm.db import database_cache_key
 from solar_crm.ui import date_br, month_label, page_intro, status_badge
 
 page_intro("Indicadores financeiros, desempenho energético e prioridades operacionais em uma única visão.")
 
-months = available_months()
+db_identity = database_cache_key()
+months = dashboard_months(db_identity)
 reference_month = st.selectbox(
     "Mês de referência",
     months,
@@ -18,7 +20,7 @@ reference_month = st.selectbox(
     key="dashboard_month",
 ) if months else date.today().replace(day=1).isoformat()
 
-metrics = dashboard_metrics(reference_month)
+metrics = dashboard_summary(reference_month, db_identity)
 
 with st.container(horizontal=True):
     st.metric("Clientes ativos", int(metrics["active_clients"]), border=True)
@@ -38,16 +40,18 @@ with st.container(horizontal=True):
         border=True,
     )
 
-trend = query_df(
+trend = dashboard_frame(
     """SELECT r.reference_month AS month,
               SUM(r.generation_kwh)/1000.0 AS generation_mwh,
               SUM(r.reference_amount-r.billed_amount) AS savings
-       FROM readings r GROUP BY r.reference_month ORDER BY r.reference_month"""
+       FROM readings r GROUP BY r.reference_month ORDER BY r.reference_month""",
+    (),
+    db_identity,
 )
 if not trend.empty:
     trend["month"] = pd.to_datetime(trend["month"])
 
-performance = query_df(
+performance = dashboard_frame(
     """SELECT p.name AS plant, c.name AS client,
               COALESCE(r.generation_kwh,0) AS generation,
               p.expected_monthly_kwh AS expected,
@@ -58,6 +62,7 @@ performance = query_df(
        LEFT JOIN readings r ON r.plant_id=p.id AND r.reference_month=?
        ORDER BY performance ASC""",
     (reference_month,),
+    db_identity,
 )
 
 left, right = st.columns([1.55, 1])
@@ -110,14 +115,16 @@ with right:
 
 st.subheader("Prioridades da equipe", icon=":material/priority_high:")
 today = date.today().isoformat()
-tasks = query_df(
+tasks = dashboard_frame(
     """SELECT t.id, t.due_date, t.title, t.priority, t.status, t.assignee,
               c.name AS client, COALESCE(p.name,'Geral') AS plant
        FROM tasks t JOIN clients c ON c.id=t.client_id
        LEFT JOIN plants p ON p.id=t.plant_id
        WHERE t.status NOT IN ('Concluída','Cancelada')
        ORDER BY CASE t.priority WHEN 'Crítica' THEN 1 WHEN 'Alta' THEN 2 WHEN 'Média' THEN 3 ELSE 4 END,
-                t.due_date LIMIT 10"""
+                t.due_date LIMIT 10""",
+    (),
+    db_identity,
 )
 if not tasks.empty:
     tasks["Prazo"] = tasks["due_date"].map(date_br)

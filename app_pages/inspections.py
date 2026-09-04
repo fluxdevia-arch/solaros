@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from solar_crm.db import query, query_one
-from solar_crm.inspection_documents import generate_inspection_pdf
+from solar_crm.document_cache import inspection_pdf
 from solar_crm.inspections import (
     INSPECTION_STATUSES,
     INSPECTION_URGENCIES,
@@ -242,7 +242,7 @@ if token:
     _show_saved_photos(current["id"])
     st.download_button(
         "Baixar relatório da vistoria em PDF",
-        generate_inspection_pdf(current["id"]),
+        inspection_pdf(current["id"], str(current.get("updated_at") or "")),
         file_name=f"{current['number'].lower()}.pdf",
         mime="application/pdf",
         icon=":material/picture_as_pdf:",
@@ -347,15 +347,19 @@ if inspections:
         with st.container(horizontal=True):
             st.download_button(
                 "Baixar relatório em PDF",
-                generate_inspection_pdf(selected["id"]),
+                inspection_pdf(selected["id"], str(selected.get("updated_at") or "")),
                 file_name=f"{selected['number'].lower()}.pdf",
                 mime="application/pdf",
                 icon=":material/picture_as_pdf:",
             )
             st.link_button("Abrir ficha de campo", share_url, icon=":material/open_in_new:")
-    with st.expander("Editar a ficha neste painel", icon=":material/edit_note:"):
-        _render_field_form(selected)
-    with st.expander("Evidências fotográficas", icon=":material/photo_library:"):
-        _show_saved_photos(selected["id"])
+    editor = st.expander("Editar a ficha neste painel", icon=":material/edit_note:", on_change="rerun")
+    if editor.open:
+        with editor:
+            _render_field_form(selected)
+    evidence = st.expander("Evidências fotográficas", icon=":material/photo_library:", on_change="rerun")
+    if evidence.open:
+        with evidence:
+            _show_saved_photos(selected["id"])
 else:
     st.info("Nenhuma vistoria cadastrada. Crie a primeira ficha para enviar à equipe de campo.", icon=":material/info:")

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+from hashlib import sha256
+from threading import Lock
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
@@ -12,6 +14,11 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SCHEMA_VERSION = 3
+
+_POSTGRES_POOL = None
+_POSTGRES_POOL_URL = ""
+_POSTGRES_POOL_LOCK = Lock()
 
 
 def get_db_path() -> Path:
@@ -23,6 +30,13 @@ def get_db_path() -> Path:
 
 def using_postgres() -> bool:
     return bool(database_url())
+
+
+def database_cache_key() -> str:
+    """Return a safe identity for Streamlit resource caches without exposing credentials."""
+    url = database_url()
+    identity = url if url else str(get_db_path().resolve())
+    return sha256(identity.encode("utf-8")).hexdigest()[:16]
 
 
 def _postgres_sql(sql: str) -> str:
@@ -38,12 +52,41 @@ def _postgres_sql(sql: str) -> str:
     return translated.replace("?", "%s")
 
 
-def _postgres_schema() -> str:
-    schema = SCHEMA.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+def _postgres_schema(script: str) -> str:
+    schema = script.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
     schema = re.sub(r"\bREAL\b", "DOUBLE PRECISION", schema)
     schema = re.sub(r"\bBLOB\b", "BYTEA", schema)
     schema = schema.replace("DEFAULT CURRENT_TIMESTAMP", "DEFAULT (CURRENT_TIMESTAMP::TEXT)")
     return schema
+
+
+def _get_postgres_pool(url: str):
+    global _POSTGRES_POOL, _POSTGRES_POOL_URL
+    with _POSTGRES_POOL_LOCK:
+        if _POSTGRES_POOL is not None and _POSTGRES_POOL_URL == url:
+            return _POSTGRES_POOL
+        if _POSTGRES_POOL is not None:
+            _POSTGRES_POOL.close()
+        try:
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
+        except ImportError as exc:  # pragma: no cover - exercised only in hosted mode
+            raise RuntimeError("Instale 'psycopg[binary,pool]' para usar o PostgreSQL.") from exc
+        pool = ConnectionPool(
+            conninfo=url,
+            min_size=0,
+            max_size=6,
+            open=False,
+            kwargs={"row_factory": dict_row, "connect_timeout": 12},
+            timeout=15,
+            max_idle=300,
+            max_lifetime=1800,
+            name="solaros",
+        )
+        pool.open()
+        _POSTGRES_POOL = pool
+        _POSTGRES_POOL_URL = url
+        return pool
 
 
 class PostgresConnection:
@@ -52,12 +95,8 @@ class PostgresConnection:
     is_postgres = True
 
     def __init__(self, url: str):
-        try:
-            import psycopg
-            from psycopg.rows import dict_row
-        except ImportError as exc:  # pragma: no cover - exercised only in hosted mode
-            raise RuntimeError("Instale 'psycopg[binary]' para usar o PostgreSQL.") from exc
-        self._connection = psycopg.connect(url, row_factory=dict_row)
+        self._pool = _get_postgres_pool(url)
+        self._connection = self._pool.getconn(timeout=15)
 
     def execute(self, sql: str, params: Iterable[Any] = ()):
         return self._connection.execute(_postgres_sql(sql), tuple(params))
@@ -68,7 +107,7 @@ class PostgresConnection:
         )
 
     def executescript(self, script: str) -> None:
-        for statement in _postgres_schema().split(";"):
+        for statement in _postgres_schema(script).split(";"):
             if statement.strip():
                 self._connection.execute(statement)
 
@@ -79,7 +118,9 @@ class PostgresConnection:
         self._connection.rollback()
 
     def close(self) -> None:
-        self._connection.close()
+        if self._connection is not None:
+            self._pool.putconn(self._connection)
+            self._connection = None
 
 
 def connect() -> sqlite3.Connection | PostgresConnection:
@@ -990,27 +1031,43 @@ def upsert_beneficiary_reading(values: dict[str, Any]) -> int:
 
 def dashboard_metrics(reference_month: str | None = None) -> dict[str, Any]:
     month = reference_month or date.today().replace(day=1).isoformat()
-    active = query_one("SELECT COUNT(*) AS value FROM clients WHERE status='Ativo'")["value"]
-    plant_row = query_one(
-        "SELECT COUNT(*) AS plants, COALESCE(SUM(installed_kwp),0) AS kwp FROM plants WHERE status!='Desativada'"
-    )
-    reading = query_one(
-        """SELECT COALESCE(SUM(generation_kwh),0) AS generation,
-                  COALESCE(SUM(reference_amount-billed_amount),0) AS savings,
-                  COALESCE(AVG(availability_pct),0) AS availability
-           FROM readings WHERE reference_month=?""",
-        (month,),
-    )
-    tasks = query_one(
-        """SELECT SUM(CASE WHEN date(due_date)<date('now') AND status NOT IN ('Concluída','Cancelada') THEN 1 ELSE 0 END) AS overdue,
-                  SUM(CASE WHEN status NOT IN ('Concluída','Cancelada') THEN 1 ELSE 0 END) AS open_tasks
-           FROM tasks"""
-    )
-    mrr_rows = query(
-        """SELECT c.*, COUNT(p.id) AS plant_count, COALESCE(SUM(p.installed_kwp),0) AS total_kwp
-           FROM contracts c LEFT JOIN plants p ON p.client_id=c.client_id
-           WHERE c.status='Ativo' GROUP BY c.id"""
-    )
+    conn = connect()
+    try:
+        active = dict(
+            conn.execute("SELECT COUNT(*) AS value FROM clients WHERE status='Ativo'").fetchone()
+        )["value"]
+        plant_row = dict(
+            conn.execute(
+                "SELECT COUNT(*) AS plants, COALESCE(SUM(installed_kwp),0) AS kwp "
+                "FROM plants WHERE status!='Desativada'"
+            ).fetchone()
+        )
+        reading = dict(
+            conn.execute(
+                """SELECT COALESCE(SUM(generation_kwh),0) AS generation,
+                          COALESCE(SUM(reference_amount-billed_amount),0) AS savings,
+                          COALESCE(AVG(availability_pct),0) AS availability
+                   FROM readings WHERE reference_month=?""",
+                (month,),
+            ).fetchone()
+        )
+        tasks = dict(
+            conn.execute(
+                """SELECT SUM(CASE WHEN date(due_date)<date('now') AND status NOT IN ('Concluída','Cancelada') THEN 1 ELSE 0 END) AS overdue,
+                          SUM(CASE WHEN status NOT IN ('Concluída','Cancelada') THEN 1 ELSE 0 END) AS open_tasks
+                   FROM tasks"""
+            ).fetchone()
+        )
+        mrr_rows = [
+            dict(row)
+            for row in conn.execute(
+                """SELECT c.*, COUNT(p.id) AS plant_count, COALESCE(SUM(p.installed_kwp),0) AS total_kwp
+                   FROM contracts c LEFT JOIN plants p ON p.client_id=c.client_id
+                   WHERE c.status='Ativo' GROUP BY c.id"""
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
     from solar_crm.calculations import contract_monthly_value
     mrr = sum(contract_monthly_value(row, row["plant_count"], row["total_kwp"]) for row in mrr_rows)
     return {
