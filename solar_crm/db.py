@@ -393,6 +393,74 @@ CREATE TABLE IF NOT EXISTS service_orders (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS site_inspections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    number TEXT UNIQUE,
+    public_token TEXT NOT NULL UNIQUE,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    plant_id INTEGER REFERENCES plants(id) ON DELETE SET NULL,
+    service_order_id INTEGER REFERENCES service_orders(id) ON DELETE SET NULL,
+    inspection_type TEXT NOT NULL DEFAULT 'Vistoria técnica',
+    status TEXT NOT NULL DEFAULT 'Rascunho',
+    urgency TEXT NOT NULL DEFAULT 'Rotina',
+    inspected_at TEXT NOT NULL,
+    technician TEXT,
+    contact_name TEXT,
+    contact_phone TEXT,
+    address TEXT NOT NULL,
+    weather TEXT,
+    ambient_temperature_c REAL,
+    roof_type TEXT,
+    roof_condition TEXT,
+    access_condition TEXT,
+    latitude REAL,
+    longitude REAL,
+    solar_orientation TEXT,
+    azimuth_deg REAL,
+    tilt_deg REAL,
+    shading_level TEXT,
+    shading_sources TEXT,
+    dc_voltage_v REAL,
+    dc_current_a REAL,
+    ac_voltage_v REAL,
+    ac_current_a REAL,
+    insulation_mohm REAL,
+    grounding_ohm REAL,
+    generation_power_kw REAL,
+    inverter_alarms TEXT,
+    safety_risks TEXT,
+    findings TEXT,
+    actions_performed TEXT,
+    recommendations TEXT,
+    materials_needed TEXT,
+    follow_up_date TEXT,
+    client_acknowledgement TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS inspection_checklist_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inspection_id INTEGER NOT NULL REFERENCES site_inspections(id) ON DELETE CASCADE,
+    category TEXT NOT NULL,
+    item TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Não verificado',
+    notes TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(inspection_id, item)
+);
+
+CREATE TABLE IF NOT EXISTS inspection_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inspection_id INTEGER NOT NULL REFERENCES site_inspections(id) ON DELETE CASCADE,
+    category TEXT NOT NULL,
+    caption TEXT,
+    filename TEXT,
+    mime_type TEXT NOT NULL,
+    image_data BLOB NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS service_contracts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     number TEXT UNIQUE,
@@ -531,6 +599,10 @@ CREATE INDEX IF NOT EXISTS idx_cash_due ON cash_transactions(due_date, status);
 CREATE INDEX IF NOT EXISTS idx_opportunities_stage ON opportunities(stage, next_action_date);
 CREATE INDEX IF NOT EXISTS idx_service_orders_status ON service_orders(status, scheduled_date);
 CREATE INDEX IF NOT EXISTS idx_service_orders_token ON service_orders(public_token);
+CREATE INDEX IF NOT EXISTS idx_site_inspections_status ON site_inspections(status, inspected_at);
+CREATE INDEX IF NOT EXISTS idx_site_inspections_token ON site_inspections(public_token);
+CREATE INDEX IF NOT EXISTS idx_inspection_items_inspection ON inspection_checklist_items(inspection_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_inspection_photos_inspection ON inspection_photos(inspection_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_service_contracts_client ON service_contracts(client_id, status);
 CREATE INDEX IF NOT EXISTS idx_sizing_projects_client ON sizing_projects(client_id, status);
 CREATE INDEX IF NOT EXISTS idx_proposals_client ON proposals(client_id, status);
@@ -878,6 +950,7 @@ def clear_business_data() -> None:
         conn.execute("DELETE FROM pv_inverters")
         conn.execute("DELETE FROM proposals")
         conn.execute("DELETE FROM opportunities")
+        conn.execute("DELETE FROM site_inspections")
         conn.execute("DELETE FROM service_orders")
         conn.execute("DELETE FROM service_contracts")
         conn.execute("DELETE FROM cash_transactions")

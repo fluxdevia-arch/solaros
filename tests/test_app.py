@@ -40,6 +40,8 @@ class StreamlitSmokeTest(unittest.TestCase):
             "app_pages/readings.py",
             "app_pages/integrations.py",
             "app_pages/operations.py",
+            "app_pages/service_orders.py",
+            "app_pages/inspections.py",
             "app_pages/reports.py",
             "app_pages/pricing.py",
             "app_pages/proposals.py",

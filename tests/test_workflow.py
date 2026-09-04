@@ -1,9 +1,22 @@
 import os
 import unittest
 import uuid
+from io import BytesIO
 from pathlib import Path
 
+from PIL import Image
+
 from solar_crm.db import init_db, query_one
+from solar_crm.inspection_documents import generate_inspection_pdf
+from solar_crm.inspections import (
+    add_inspection_photo,
+    create_inspection,
+    inspection_by_token,
+    inspection_details,
+    inspection_items,
+    inspection_share_url,
+    update_inspection,
+)
 from solar_crm.service_documents import generate_service_contract_pdf, generate_service_order_pdf
 from solar_crm.workflow import (
     create_opportunity,
@@ -90,6 +103,53 @@ class WorkflowTests(unittest.TestCase):
         pdf = generate_service_contract_pdf(contract_id)
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 4000)
+
+    def test_mobile_inspection_workflow_and_photographic_pdf(self):
+        client = query_one("SELECT id FROM clients ORDER BY id LIMIT 1")
+        plant = query_one("SELECT id, address FROM plants WHERE client_id=? ORDER BY id LIMIT 1", (client["id"],))
+        inspection_id = create_inspection({
+            "client_id": client["id"],
+            "plant_id": plant["id"],
+            "inspection_type": "Manutenção preventiva",
+            "inspected_at": "2026-09-04",
+            "technician": "Carlos Jessé",
+            "address": plant["address"],
+        })
+        inspection = inspection_details(inspection_id)
+        self.assertTrue(inspection["number"].startswith("VIS-"))
+        self.assertEqual(inspection_by_token(inspection["public_token"])["id"], inspection_id)
+        self.assertIn("inspection=", inspection_share_url(inspection, "https://solar.exemplo.com/"))
+
+        items = inspection_items(inspection_id)
+        self.assertGreaterEqual(len(items), 18)
+        for item in items:
+            item["status"] = "Conforme"
+            item["notes"] = "Verificado em campo."
+        update_inspection(inspection_id, {
+            **inspection,
+            "status": "Concluída",
+            "urgency": "Rotina",
+            "weather": "Ensolarado",
+            "solar_orientation": "Norte",
+            "azimuth_deg": 0,
+            "tilt_deg": 18,
+            "shading_level": "Baixo",
+            "dc_voltage_v": 620,
+            "dc_current_a": 13.4,
+            "ac_voltage_v": 380,
+            "ac_current_a": 57.2,
+            "generation_power_kw": 35.8,
+            "findings": "Sistema operando sem falhas críticas.",
+            "actions_performed": "Reaperto e inspeção visual.",
+            "recommendations": "Manter limpeza semestral.",
+        }, items)
+
+        photo_buffer = BytesIO()
+        Image.new("RGB", (900, 600), "#F58220").save(photo_buffer, format="PNG")
+        add_inspection_photo(inspection_id, photo_buffer.getvalue(), "modulos.png", "Módulos", "Vista geral do arranjo")
+        pdf = generate_inspection_pdf(inspection_id)
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        self.assertGreater(len(pdf), 7000)
 
 
 if __name__ == "__main__":

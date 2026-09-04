@@ -15,6 +15,9 @@ Sistema profissional para estruturar o pós-venda e o pré-dimensionamento de pr
 - Kanban comercial com etapas, valor do funil, probabilidade, responsável e próxima ação.
 - Ordens de serviço com endereço, contato, instruções, materiais, PDF e link individual para a equipe de campo.
 - Atualização da O.S. pelo técnico e possibilidade de invalidar o link anterior.
+- Vistorias técnicas mobile-first, vinculadas a cliente, usina e ordem de serviço, com link individual para a equipe de campo.
+- Checklist elétrico e fotovoltaico, posição solar, sombreamento, coordenadas, medições CC/CA, aterramento, diagnóstico, retorno e até 20 fotos por vistoria.
+- Relatório fotográfico de vistoria em PDF com identidade OnGrid, resultados destacados e assinatura técnica padronizada.
 - Gerador de contratos para pós-venda, manutenção, consultoria e projetos, com histórico e PDF.
 - Cálculo de cobertura, desempenho, disponibilidade e economia estimada.
 - Agenda de limpeza, prevenção, relacionamento e relatórios recorrentes.
@@ -88,6 +91,10 @@ Para executar a sincronização por agendador do Windows, configure uma tarefa q
 Em **Configurações**, informe a URL usada pela equipe para acessar o SolarOS. Em rede local, use o IP do computador servidor, por exemplo `http://192.168.0.20:8501`. Se o sistema estiver hospedado, use a URL HTTPS pública.
 
 Cada O.S. recebe um código aleatório. O link abre uma visualização de campo sem a navegação administrativa e permite registrar o andamento e a conclusão. O botão **Gerar novo link** invalida imediatamente o endereço anterior.
+
+## Vistorias em celular e tablet
+
+Na página **Vistorias**, crie a ficha, vincule uma O.S. quando aplicável e envie o link individual pelo WhatsApp. A ficha abre sem o menu administrativo, adapta os campos à tela do aparelho e permite fotografar com a câmera ou selecionar imagens da galeria. As fotos são reduzidas antes do armazenamento para economizar espaço no banco gratuito. Ao concluir, o relatório em PDF reúne identificação, condições do local, posição solar, medições, checklist, diagnóstico, fotos e assinaturas.
 
 ## Contratos de serviço
 
