@@ -5,14 +5,28 @@ import pandas as pd
 import streamlit as st
 
 from solar_crm.calculations import money, number_br, percent
-from solar_crm.data_cache import dashboard_frame, dashboard_months, dashboard_summary
-from solar_crm.db import database_cache_key
+from solar_crm.data_cache import (
+    clear_dashboard_caches,
+    complete_dashboard_metrics,
+    dashboard_frame,
+    dashboard_months,
+    dashboard_summary,
+)
+from solar_crm.db import SCHEMA_VERSION, database_cache_key
 from solar_crm.ui import date_br, month_label, page_intro, status_badge
 
 page_intro("Indicadores financeiros, desempenho energético e prioridades operacionais em uma única visão.")
 
+with st.container(horizontal=True, horizontal_alignment="right"):
+    st.button(
+        "Atualizar dados",
+        icon=":material/refresh:",
+        key="dashboard_refresh",
+        on_click=clear_dashboard_caches,
+    )
+
 db_identity = database_cache_key()
-months = dashboard_months(db_identity)
+months = dashboard_months(db_identity, SCHEMA_VERSION)
 reference_month = st.selectbox(
     "Mês de referência",
     months,
@@ -20,7 +34,9 @@ reference_month = st.selectbox(
     key="dashboard_month",
 ) if months else date.today().replace(day=1).isoformat()
 
-metrics = dashboard_summary(reference_month, db_identity)
+metrics = complete_dashboard_metrics(
+    dashboard_summary(reference_month, db_identity, SCHEMA_VERSION)
+)
 
 with st.container(horizontal=True):
     st.metric("Clientes ativos", int(metrics["active_clients"]), border=True)
@@ -48,6 +64,7 @@ trend = dashboard_frame(
        FROM readings r GROUP BY r.reference_month ORDER BY r.reference_month""",
     (),
     db_identity,
+    SCHEMA_VERSION,
 )
 if not trend.empty:
     trend["month"] = pd.to_datetime(trend["month"])
@@ -64,6 +81,7 @@ performance = dashboard_frame(
        ORDER BY performance ASC""",
     (reference_month,),
     db_identity,
+    SCHEMA_VERSION,
 )
 
 left, right = st.columns([1.55, 1])
@@ -126,6 +144,7 @@ tasks = dashboard_frame(
                 t.due_date LIMIT 10""",
     (),
     db_identity,
+    SCHEMA_VERSION,
 )
 if not tasks.empty:
     tasks["Prazo"] = tasks["due_date"].map(date_br)

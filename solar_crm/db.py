@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""

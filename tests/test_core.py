@@ -281,6 +281,17 @@ class DatabaseAndPdfTests(unittest.TestCase):
             3,
         )
 
+    def test_dashboard_accepts_legacy_cached_metrics_without_crashing(self):
+        from solar_crm.data_cache import complete_dashboard_metrics
+
+        legacy_payload = {"active_clients": 2, "mrr": 6600.0}
+        metrics = complete_dashboard_metrics(legacy_payload)
+
+        self.assertEqual(metrics["active_clients"], 2)
+        self.assertEqual(metrics["mrr"], 6600.0)
+        self.assertEqual(metrics["receivable"], 0)
+        self.assertEqual(metrics["generation"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
