@@ -1,15 +1,17 @@
 import streamlit as st
 
 from solar_crm.auth import render_user_sidebar, require_login
+from solar_crm.branding import APP_LOGO, APP_NAME
 from solar_crm.config import seed_demo_data
 from solar_crm.db import SCHEMA_VERSION, database_cache_key, init_db, using_postgres
 
 st.set_page_config(
-    page_title="SolarOS · Gestão solar",
+    page_title=f"{APP_NAME} · Gestão solar",
     page_icon=":material/solar_power:",
     layout="wide",
     initial_sidebar_state="auto",
 )
+st.logo(str(APP_LOGO), size="large")
 
 field_order_mode = bool(str(st.query_params.get("os") or "").strip())
 field_inspection_mode = bool(str(st.query_params.get("inspection") or "").strip())
@@ -77,7 +79,7 @@ pages = {
 page = st.navigation(pages, position="sidebar")
 
 with st.sidebar:
-    st.markdown("### :material/wb_sunny: SolarOS")
+    st.markdown(f"### {APP_NAME}")
     st.caption("Operação, pós-venda e engenharia solar · v2.1")
     st.caption("Banco em nuvem" if using_postgres() else "Banco local")
     st.divider()

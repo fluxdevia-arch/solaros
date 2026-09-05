@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from solar_crm.branding import APP_LOGO, APP_NAME
 from solar_crm.config import allowed_emails, as_bool, database_url, setting
 
 
@@ -32,13 +33,15 @@ def require_login() -> bool:
         return False
 
     if not st.user.is_logged_in:
-        st.title("SolarOS", icon=":material/solar_power:")
-        st.subheader("Gestão profissional de energia solar")
+        with st.container(horizontal_alignment="center"):
+            st.image(str(APP_LOGO), width=320)
+            st.title(APP_NAME, text_alignment="center")
+            st.subheader("Gestão profissional de energia solar", text_alignment="center")
         with st.container(border=True):
             st.markdown("#### Acesso restrito")
             st.write("Entre com seu e-mail e sua senha para acessar os dados da empresa.")
             if st.button(
-                "Entrar no SolarOS",
+                f"Entrar no {APP_NAME}",
                 type="primary",
                 icon=":material/login:",
                 width="stretch",
