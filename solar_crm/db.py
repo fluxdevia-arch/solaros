@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -720,7 +720,9 @@ def init_db(seed: bool = True) -> None:
         )
         if seed and fresh_install:
             _seed(conn)
-        _ensure_recurring_invoices(conn, date.today().replace(day=1).isoformat())
+        current_month = date.today().replace(day=1).isoformat()
+        _normalize_active_recurring_contracts(conn, current_month)
+        _ensure_recurring_invoices(conn, current_month)
         _backfill_cash_entries(conn)
         conn.commit()
     finally:
@@ -872,6 +874,53 @@ def _ensure_recurring_invoices(
                 amount,
                 contract.get("scope") or "Mensalidade de pós-venda.",
             ),
+        )
+
+
+def _normalize_active_recurring_contracts(
+    conn: sqlite3.Connection | PostgresConnection,
+    reference_month: str,
+) -> None:
+    """Keep only the newest monthly contract active for each client."""
+    stale_contracts = conn.execute(
+        """SELECT c.id
+           FROM contracts c
+           WHERE c.status='Ativo'
+             AND c.billing_cycle='Mensal'
+             AND EXISTS (
+                 SELECT 1
+                 FROM contracts newer
+                 WHERE newer.client_id=c.client_id
+                   AND newer.status='Ativo'
+                   AND newer.billing_cycle='Mensal'
+                   AND newer.id>c.id
+             )"""
+    ).fetchall()
+    month = date.fromisoformat(str(reference_month)[:10]).replace(day=1).isoformat()
+    for row in stale_contracts:
+        contract_id = dict(row)["id"]
+        conn.execute(
+            "UPDATE contracts SET status='Encerrado' WHERE id=?",
+            (contract_id,),
+        )
+        conn.execute(
+            """UPDATE cash_transactions
+               SET status='Cancelado', settlement_date=NULL
+               WHERE source_type='invoice'
+                 AND status='A receber'
+                 AND source_id IN (
+                     SELECT id FROM invoices
+                     WHERE contract_id=? AND reference_month>=?
+                 )""",
+            (contract_id, month),
+        )
+        conn.execute(
+            """UPDATE invoices
+               SET status='Cancelado', paid_at=NULL
+               WHERE contract_id=?
+                 AND reference_month>=?
+                 AND status IN ('Pendente', 'Atrasado')""",
+            (contract_id, month),
         )
 
 
@@ -1206,6 +1255,13 @@ def dashboard_metrics(reference_month: str | None = None) -> dict[str, Any]:
                    LEFT JOIN plants p
                      ON p.client_id=c.client_id AND p.status!='Desativada'
                    WHERE c.status='Ativo' AND c.billing_cycle='Mensal'
+                     AND NOT EXISTS (
+                         SELECT 1 FROM contracts newer
+                         WHERE newer.client_id=c.client_id
+                           AND newer.status='Ativo'
+                           AND newer.billing_cycle='Mensal'
+                           AND newer.id>c.id
+                     )
                    GROUP BY c.id"""
             ).fetchall()
         ]

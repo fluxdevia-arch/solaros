@@ -89,9 +89,18 @@ with portfolio:
            LEFT JOIN (
                SELECT client_id, COUNT(*) AS plant_count,
                       COALESCE(SUM(installed_kwp), 0) AS total_kwp
-               FROM plants GROUP BY client_id
+               FROM plants WHERE status!='Desativada' GROUP BY client_id
            ) p ON p.client_id=c.client_id
-           WHERE c.status='Ativo' ORDER BY cl.name"""
+           WHERE c.status='Ativo'
+             AND c.billing_cycle='Mensal'
+             AND NOT EXISTS (
+                 SELECT 1 FROM contracts newer
+                 WHERE newer.client_id=c.client_id
+                   AND newer.status='Ativo'
+                   AND newer.billing_cycle='Mensal'
+                   AND newer.id>c.id
+             )
+           ORDER BY cl.name"""
     )
     rows = []
     for contract in contracts:

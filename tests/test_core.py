@@ -219,6 +219,18 @@ class DatabaseAndPdfTests(unittest.TestCase):
             """INSERT INTO clients (name, client_type, status)
                VALUES ('Cliente mensal B', 'Pessoa jurídica', 'Ativo')"""
         )
+        stale_monthly = execute(
+            """INSERT INTO contracts
+               (client_id, plan, start_date, billing_day, base_fee, billing_cycle, status)
+               VALUES (?, 'Mensal antigo', ?, 10, 2400, 'Mensal', 'Ativo')""",
+            (client_a, month),
+        )
+        stale_invoice = execute(
+            """INSERT INTO invoices
+               (contract_id, reference_month, due_date, amount, status, notes)
+               VALUES (?, ?, ?, 2400, 'Pendente', 'Contrato substituído')""",
+            (stale_monthly, month, month),
+        )
         monthly_a = execute(
             """INSERT INTO contracts
                (client_id, plan, start_date, billing_day, base_fee, billing_cycle, status)
@@ -262,10 +274,20 @@ class DatabaseAndPdfTests(unittest.TestCase):
         self.assertEqual(
             query_one(
                 """SELECT COUNT(*) AS value FROM cash_transactions
-                   WHERE competence_month=? AND deleted_at IS NULL""",
+                   WHERE competence_month=?
+                     AND status!='Cancelado'
+                     AND deleted_at IS NULL""",
                 (month,),
             )["value"],
             3,
+        )
+        self.assertEqual(
+            query_one("SELECT status FROM contracts WHERE id=?", (stale_monthly,))["status"],
+            "Encerrado",
+        )
+        self.assertEqual(
+            query_one("SELECT status FROM invoices WHERE id=?", (stale_invoice,))["status"],
+            "Cancelado",
         )
         metrics = dashboard_metrics(month)
         self.assertEqual(float(metrics["mrr"]), 1200.0)
@@ -275,7 +297,9 @@ class DatabaseAndPdfTests(unittest.TestCase):
         self.assertEqual(
             query_one(
                 """SELECT COUNT(*) AS value FROM cash_transactions
-                   WHERE competence_month=? AND deleted_at IS NULL""",
+                   WHERE competence_month=?
+                     AND status!='Cancelado'
+                     AND deleted_at IS NULL""",
                 (month,),
             )["value"],
             3,
