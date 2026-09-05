@@ -86,7 +86,11 @@ else:
                         "client_obligations": client_obligations, "termination_terms": termination_terms,
                         "additional_terms": additional_terms, "venue": venue, "status": "Rascunho",
                     })
-                    flash("Minuta contratual gerada.")
+                    flash(
+                        "Minuta contratual gerada e valor lançado automaticamente no caixa."
+                        if amount > 0
+                        else "Minuta contratual gerada. Informe um valor para gerar o lançamento no caixa."
+                    )
                     st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))

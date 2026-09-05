@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -396,6 +396,8 @@ CREATE TABLE IF NOT EXISTS cash_transactions (
     document_number TEXT,
     description TEXT NOT NULL,
     notes TEXT,
+    source_type TEXT,
+    source_id INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -717,6 +719,7 @@ def init_db(seed: bool = True) -> None:
         )
         if seed and fresh_install:
             _seed(conn)
+        _backfill_cash_entries(conn)
         conn.commit()
     finally:
         conn.close()
@@ -737,6 +740,15 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
         }
         for name, column_type in additions.items():
             conn.execute(f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {name} {column_type}")
+        cash_additions = {
+            "source_type": "TEXT",
+            "source_id": "BIGINT",
+        }
+        for name, column_type in cash_additions.items():
+            conn.execute(f"ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS {name} {column_type}")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_source ON cash_transactions(source_type, source_id)"
+        )
         return
     columns = {row[1] for row in conn.execute("PRAGMA table_info(settings)").fetchall()}
     additions = {
@@ -753,6 +765,62 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
     for name, column_type in additions.items():
         if name not in columns:
             conn.execute(f"ALTER TABLE settings ADD COLUMN {name} {column_type}")
+    cash_columns = {row[1] for row in conn.execute("PRAGMA table_info(cash_transactions)").fetchall()}
+    cash_additions = {
+        "source_type": "TEXT",
+        "source_id": "INTEGER",
+    }
+    for name, column_type in cash_additions.items():
+        if name not in cash_columns:
+            conn.execute(f"ALTER TABLE cash_transactions ADD COLUMN {name} {column_type}")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_source ON cash_transactions(source_type, source_id)"
+    )
+
+
+def _backfill_cash_entries(conn: sqlite3.Connection | PostgresConnection) -> None:
+    """Bring existing contract charges into cash once, preserving manual entries."""
+    conn.execute(
+        """INSERT INTO cash_transactions
+           (transaction_type, category, client_id, plant_id, competence_month, issue_date,
+            due_date, settlement_date, amount, status, payment_method, document_number,
+            description, notes, source_type, source_id)
+           SELECT 'Receita',
+                  CASE WHEN c.billing_cycle='Parcela única' THEN 'Consultoria e mentoria'
+                       ELSE 'Mensalidade pós-venda' END,
+                  c.client_id, NULL, i.reference_month, i.reference_month, i.due_date,
+                  i.paid_at, i.amount,
+                  CASE WHEN i.status='Pago' THEN 'Recebido'
+                       WHEN i.status='Cancelado' THEN 'Cancelado'
+                       ELSE 'A receber' END,
+                  NULL, 'FAT-' || i.id, c.plan, COALESCE(i.notes, c.scope, ''),
+                  'invoice', i.id
+           FROM invoices i
+           JOIN contracts c ON c.id=i.contract_id
+           WHERE NOT EXISTS (
+               SELECT 1 FROM cash_transactions ct
+               WHERE ct.source_type='invoice' AND ct.source_id=i.id
+           )"""
+    )
+    conn.execute(
+        """INSERT INTO cash_transactions
+           (transaction_type, category, client_id, plant_id, competence_month, issue_date,
+            due_date, settlement_date, amount, status, payment_method, document_number,
+            description, notes, source_type, source_id)
+           SELECT 'Receita', 'Contratos de serviço', sc.client_id, NULL,
+                  substr(sc.start_date,1,7) || '-01', sc.start_date, sc.start_date, NULL,
+                  sc.amount,
+                  CASE WHEN sc.status='Cancelado' THEN 'Cancelado' ELSE 'A receber' END,
+                  NULL, sc.number, sc.title,
+                  COALESCE(NULLIF(sc.payment_terms,''), sc.scope, ''),
+                  'service_contract', sc.id
+           FROM service_contracts sc
+           WHERE sc.amount > 0
+             AND NOT EXISTS (
+                 SELECT 1 FROM cash_transactions ct
+                 WHERE ct.source_type='service_contract' AND ct.source_id=sc.id
+             )"""
+    )
 
 
 def _seed(conn: sqlite3.Connection | PostgresConnection) -> None:

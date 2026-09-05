@@ -103,6 +103,14 @@ class WorkflowTests(unittest.TestCase):
         pdf = generate_service_contract_pdf(contract_id)
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 4000)
+        cash_entry = query_one(
+            """SELECT * FROM cash_transactions
+               WHERE source_type='service_contract' AND source_id=?""",
+            (contract_id,),
+        )
+        self.assertIsNotNone(cash_entry)
+        self.assertEqual(float(cash_entry["amount"]), 4500.0)
+        self.assertEqual(cash_entry["status"], "A receber")
 
     def test_mobile_inspection_workflow_and_photographic_pdf(self):
         client = query_one("SELECT id FROM clients ORDER BY id LIMIT 1")

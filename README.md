@@ -31,7 +31,8 @@ Sistema profissional para estruturar o pós-venda e o pré-dimensionamento de pr
 - Propostas comerciais em PDF para consultoria, projeto, manutenção e pós-venda, com histórico, status, assinatura técnica e identidade visual configurável.
 - Consulta guiada ao padrão de entrada residencial da Energisa PB, com referência às tabelas da NDU 001.
 - Memorial de pré-dimensionamento para download.
-- Caixa gerencial com receitas, despesas, faturamento de manutenção, contas a receber/pagar e fluxo mensal.
+- Caixa gerencial com receitas, despesas, faturamento de manutenção, contas a receber/pagar, fluxo mensal e edição dos lançamentos.
+- Lançamento automático no caixa de consultorias, contratos de serviço, cobranças e primeira mensalidade dos novos contratos recorrentes.
 - Assinatura do responsável técnico e detalhamento por unidade beneficiária no relatório PDF, configuráveis no sistema.
 - Upload de assinatura manuscrita em PNG/JPG, com remoção automática do fundo e posicionamento acima da linha.
 - Modo white-label por instalação, com nome e logotipo próprios no login, menu e documentos.

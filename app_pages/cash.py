@@ -12,6 +12,8 @@ from solar_crm.ui import date_br, flash, month_label, page_intro, show_flash
 
 
 REVENUE_CATEGORIES = [
+    "Consultoria e mentoria",
+    "Contratos de serviço",
     "Manutenção corretiva",
     "Manutenção preventiva",
     "Limpeza de módulos",
@@ -30,17 +32,41 @@ EXPENSE_CATEGORIES = [
     "Impostos e taxas",
     "Outras despesas",
 ]
-MAINTENANCE_CATEGORIES = REVENUE_CATEGORIES[:5]
+MAINTENANCE_CATEGORIES = [
+    "Manutenção corretiva",
+    "Manutenção preventiva",
+    "Limpeza de módulos",
+    "Visita técnica",
+    "Venda de peças",
+]
+
+
+def _date_value(value, fallback=None):
+    if value is None or pd.isna(value) or str(value).strip() == "":
+        return fallback
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return fallback
+
+
+def _text_value(value) -> str:
+    return "" if value is None or pd.isna(value) else str(value)
 
 
 page_intro("Registre faturamento de manutenção, receitas recorrentes, despesas, recebimentos e compromissos do caixa.")
 show_flash()
 
 clients = query("SELECT id, name FROM clients WHERE status='Ativo' ORDER BY name")
+all_clients = query("SELECT id, name, status FROM clients ORDER BY name")
 plants = query(
     """SELECT p.id, p.name, c.name AS client_name
        FROM plants p JOIN clients c ON c.id=p.client_id
        WHERE p.status!='Desativada' ORDER BY c.name, p.name"""
+)
+all_plants = query(
+    """SELECT p.id, p.name, p.status, c.name AS client_name
+       FROM plants p JOIN clients c ON c.id=p.client_id ORDER BY c.name, p.name"""
 )
 client_map = {"Sem cliente vinculado": None, **{row["name"]: row["id"] for row in clients}}
 plant_map = {"Sem usina vinculada": None, **{f"{row['name']} · {row['client_name']}": row["id"] for row in plants}}
@@ -125,10 +151,15 @@ transactions_tab, maintenance_tab, flow_tab = st.tabs([
 ])
 
 transactions = query_df(
-    """SELECT ct.id, ct.issue_date, ct.due_date, ct.settlement_date, ct.transaction_type,
+    """SELECT ct.id, ct.client_id, ct.plant_id, ct.competence_month,
+              ct.issue_date, ct.due_date,
+              ct.settlement_date, ct.transaction_type,
               ct.category, ct.description, ct.amount, ct.status, ct.payment_method,
-              ct.document_number, COALESCE(c.name,'-') AS client,
-              COALESCE(p.name,'-') AS plant
+              ct.document_number, ct.notes, ct.source_type, ct.source_id,
+              COALESCE(c.name,'-') AS client, COALESCE(p.name,'-') AS plant,
+              CASE WHEN ct.source_type='invoice' THEN 'Cobrança de contrato'
+                   WHEN ct.source_type='service_contract' THEN 'Contrato de serviço'
+                   ELSE 'Lançamento manual' END AS source
        FROM cash_transactions ct
        LEFT JOIN clients c ON c.id=ct.client_id
        LEFT JOIN plants p ON p.id=ct.plant_id
@@ -140,12 +171,16 @@ with transactions_tab:
     if transactions.empty:
         st.info("Nenhum lançamento registrado neste mês.", icon=":material/info:")
     else:
-        display = transactions.rename(columns={
+        display = transactions[[
+            "id", "issue_date", "due_date", "settlement_date", "transaction_type",
+            "category", "description", "amount", "status", "payment_method",
+            "document_number", "client", "plant", "source",
+        ]].rename(columns={
             "id": "ID", "issue_date": "Emissão", "due_date": "Vencimento",
             "settlement_date": "Baixa", "transaction_type": "Tipo", "category": "Categoria",
             "description": "Descrição", "amount": "Valor", "status": "Status",
             "payment_method": "Pagamento", "document_number": "Documento",
-            "client": "Cliente", "plant": "Usina",
+            "client": "Cliente", "plant": "Usina", "source": "Origem",
         })
         for column in ["Emissão", "Vencimento", "Baixa"]:
             display[column] = display[column].map(date_br)
@@ -165,6 +200,151 @@ with transactions_tab:
             "text/csv",
             icon=":material/download:",
         )
+
+        with st.expander("Editar lançamento", icon=":material/edit:"):
+            edit_labels = {
+                f"#{int(row.id)} · {row.description} · {money(row.amount)}": int(row.id)
+                for row in transactions.itertuples()
+            }
+            edit_label = st.selectbox(
+                "Lançamento para editar", list(edit_labels), key="cash_edit_entry"
+            )
+            edit_id = edit_labels[edit_label]
+            edit_row = transactions.loc[transactions["id"] == edit_id].iloc[0]
+            edit_type = str(edit_row["transaction_type"])
+            edit_categories = list(REVENUE_CATEGORIES if edit_type == "Receita" else EXPENSE_CATEGORIES)
+            current_category = str(edit_row["category"])
+            if current_category not in edit_categories:
+                edit_categories.append(current_category)
+
+            edit_client_ids = [None, *[int(row["id"]) for row in all_clients]]
+            edit_client_names = {
+                None: "Sem cliente vinculado",
+                **{
+                    int(row["id"]): f"{row['name']}" + (" · Inativo" if row["status"] != "Ativo" else "")
+                    for row in all_clients
+                },
+            }
+            edit_plant_ids = [None, *[int(row["id"]) for row in all_plants]]
+            edit_plant_names = {
+                None: "Sem usina vinculada",
+                **{
+                    int(row["id"]): f"{row['name']} · {row['client_name']}"
+                    + (" · Desativada" if row["status"] == "Desativada" else "")
+                    for row in all_plants
+                },
+            }
+            current_client_id = None if pd.isna(edit_row["client_id"]) else int(edit_row["client_id"])
+            current_plant_id = None if pd.isna(edit_row["plant_id"]) else int(edit_row["plant_id"])
+            edit_status_options = (
+                ["Recebido", "A receber", "Cancelado"]
+                if edit_type == "Receita"
+                else ["Pago", "A pagar", "Cancelado"]
+            )
+            current_status = str(edit_row["status"])
+            if current_status not in edit_status_options:
+                edit_status_options.append(current_status)
+            payment_options = ["Não informado", "Pix", "Boleto", "Transferência", "Cartão", "Dinheiro", "Outro"]
+            current_payment = _text_value(edit_row["payment_method"]) or "Não informado"
+            if current_payment not in payment_options:
+                payment_options.append(current_payment)
+
+            st.caption(
+                f"Tipo: {edit_type} · Origem: {edit_row['source']}. "
+                "A edição financeira não altera o texto do contrato original."
+            )
+            with st.form("cash_edit_form"):
+                edit_category = st.selectbox(
+                    "Categoria",
+                    edit_categories,
+                    index=edit_categories.index(current_category),
+                    key="cash_edit_category",
+                )
+                edit_description = st.text_input(
+                    "Descrição", value=str(edit_row["description"]), key="cash_edit_description"
+                )
+                e1, e2 = st.columns(2)
+                edit_client_id = e1.selectbox(
+                    "Cliente",
+                    edit_client_ids,
+                    index=edit_client_ids.index(current_client_id),
+                    format_func=lambda value: edit_client_names[value],
+                    key="cash_edit_client",
+                )
+                edit_plant_id = e2.selectbox(
+                    "Usina",
+                    edit_plant_ids,
+                    index=edit_plant_ids.index(current_plant_id),
+                    format_func=lambda value: edit_plant_names[value],
+                    key="cash_edit_plant",
+                )
+                edit_amount = e1.number_input(
+                    "Valor (R$)", min_value=0.01, value=float(edit_row["amount"]), step=10.0,
+                    key="cash_edit_amount",
+                )
+                edit_competence = e2.date_input(
+                    "Competência",
+                    value=_date_value(edit_row["competence_month"], date.today().replace(day=1)),
+                    key="cash_edit_competence",
+                )
+                edit_issue = e1.date_input(
+                    "Data de emissão", value=_date_value(edit_row["issue_date"], date.today()),
+                    key="cash_edit_issue",
+                )
+                edit_due = e2.date_input(
+                    "Vencimento", value=_date_value(edit_row["due_date"], date.today()),
+                    key="cash_edit_due",
+                )
+                edit_status = e1.selectbox(
+                    "Status", edit_status_options, index=edit_status_options.index(current_status),
+                    key="cash_edit_status",
+                )
+                edit_settlement = e2.date_input(
+                    "Data do recebimento/pagamento",
+                    value=_date_value(edit_row["settlement_date"]),
+                    key="cash_edit_settlement",
+                )
+                edit_payment = e1.selectbox(
+                    "Forma de pagamento", payment_options,
+                    index=payment_options.index(current_payment), key="cash_edit_payment",
+                )
+                edit_document = e2.text_input(
+                    "Nº da OS, NF, recibo ou contrato",
+                    value=_text_value(edit_row["document_number"]), key="cash_edit_document",
+                )
+                edit_notes = st.text_area(
+                    "Observações", value=_text_value(edit_row["notes"]), key="cash_edit_notes"
+                )
+                save_edit = st.form_submit_button(
+                    "Salvar alterações", type="primary", icon=":material/save:",
+                    key="cash_edit_submit",
+                )
+            if save_edit:
+                if not edit_description.strip():
+                    st.error("Informe uma descrição para o lançamento.")
+                else:
+                    final_settlement = edit_settlement
+                    if edit_status in ("Recebido", "Pago") and final_settlement is None:
+                        final_settlement = date.today()
+                    if edit_status not in ("Recebido", "Pago"):
+                        final_settlement = None
+                    execute(
+                        """UPDATE cash_transactions
+                           SET category=?, client_id=?, plant_id=?, competence_month=?, issue_date=?,
+                               due_date=?, settlement_date=?, amount=?, status=?, payment_method=?,
+                               document_number=?, description=?, notes=?
+                           WHERE id=?""",
+                        (
+                            edit_category, edit_client_id, edit_plant_id,
+                            edit_competence.replace(day=1).isoformat(), edit_issue.isoformat(),
+                            edit_due.isoformat(), final_settlement.isoformat() if final_settlement else None,
+                            edit_amount, edit_status,
+                            None if edit_payment == "Não informado" else edit_payment,
+                            edit_document.strip(), edit_description.strip(), edit_notes.strip(), edit_id,
+                        ),
+                    )
+                    flash("Lançamento atualizado no caixa.")
+                    st.rerun()
 
         open_rows = transactions[transactions["status"].isin(["A receber", "A pagar"])]
         if not open_rows.empty:

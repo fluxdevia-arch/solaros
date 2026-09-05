@@ -163,9 +163,70 @@ class StreamlitSmokeTest(unittest.TestCase):
         self.assertEqual(charge["status"], "Pendente")
         self.assertEqual(charge["notes"], "Parcela única da análise técnica da usina principal.")
 
+        cash_entry = query_one(
+            "SELECT * FROM cash_transactions WHERE source_type='invoice' AND source_id=?",
+            (charge["id"],),
+        )
+        self.assertIsNotNone(cash_entry)
+        self.assertEqual(float(cash_entry["amount"]), 3000.0)
+        self.assertEqual(cash_entry["status"], "A receber")
+        self.assertEqual(cash_entry["category"], "Consultoria e mentoria")
+
+        app.switch_page("app_pages/cash.py").run()
+        self.assertFalse(app.exception)
+        edit_label = next(
+            option for option in app.selectbox(key="cash_edit_entry").options
+            if option.startswith(f"#{cash_entry['id']} ·")
+        )
+        app.selectbox(key="cash_edit_entry").set_value(edit_label).run()
+        app.text_input(key="cash_edit_description").set_value("Consultoria técnica revisada")
+        app.number_input(key="cash_edit_amount").set_value(3250.0)
+        app.selectbox(key="cash_edit_status").set_value("Recebido")
+        app.selectbox(key="cash_edit_payment").set_value("Pix")
+        app.button(key="cash_edit_submit").click().run()
+        self.assertFalse(app.exception)
+
+        edited_cash = query_one("SELECT * FROM cash_transactions WHERE id=?", (cash_entry["id"],))
+        self.assertEqual(edited_cash["description"], "Consultoria técnica revisada")
+        self.assertEqual(float(edited_cash["amount"]), 3250.0)
+        self.assertEqual(edited_cash["status"], "Recebido")
+        self.assertEqual(edited_cash["payment_method"], "Pix")
+        self.assertIsNotNone(edited_cash["settlement_date"])
+
         if previous_recurring:
             recurring = query_one("SELECT status FROM contracts WHERE id=?", (previous_recurring["id"],))
             self.assertEqual(recurring["status"], "Ativo")
+
+    def test_recurring_contract_creates_first_cash_entry(self):
+        from solar_crm.db import query_one
+
+        app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        app = AppTest.from_file(app_path, default_timeout=20).run()
+        app.switch_page("app_pages/clients.py").run()
+        self.assertFalse(app.exception)
+        client_id = app.session_state["selected_client_id"]
+
+        app.number_input(key="recurring_base_fee").set_value(500.0)
+        app.number_input(key="recurring_per_plant").set_value(0.0)
+        app.number_input(key="recurring_per_kwp").set_value(0.0)
+        app.number_input(key="recurring_extras").set_value(0.0)
+        app.number_input(key="recurring_discount").set_value(0.0)
+        app.button(key="create_contract_submit").click().run()
+        self.assertFalse(app.exception)
+
+        contract = query_one(
+            "SELECT * FROM contracts WHERE client_id=? AND status='Ativo' ORDER BY id DESC LIMIT 1",
+            (client_id,),
+        )
+        invoice = query_one("SELECT * FROM invoices WHERE contract_id=?", (contract["id"],))
+        cash_entry = query_one(
+            "SELECT * FROM cash_transactions WHERE source_type='invoice' AND source_id=?",
+            (invoice["id"],),
+        )
+        self.assertEqual(float(invoice["amount"]), 500.0)
+        self.assertIsNotNone(cash_entry)
+        self.assertEqual(float(cash_entry["amount"]), 500.0)
+        self.assertEqual(cash_entry["category"], "Mensalidade pós-venda")
 
     def test_public_service_order_route_renders_without_login(self):
         from solar_crm.db import init_db, query_one

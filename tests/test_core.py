@@ -85,7 +85,25 @@ class DatabaseAndPdfTests(unittest.TestCase):
                (transaction_type, category, competence_month, issue_date, due_date, amount, status, description)
                VALUES ('Receita','Manutenção preventiva','2026-09-01','2026-09-01','2026-09-10',850,'A receber','Revisão anual')"""
         )
-        self.assertEqual(query_one("SELECT COUNT(*) AS value FROM cash_transactions")["value"], 1)
+        self.assertEqual(
+            query_one(
+                "SELECT COUNT(*) AS value FROM cash_transactions WHERE description='Revisão anual'"
+            )["value"],
+            1,
+        )
+        self.assertEqual(
+            query_one(
+                "SELECT COUNT(*) AS value FROM cash_transactions WHERE source_type='invoice'"
+            )["value"],
+            9,
+        )
+        init_db(seed=True)
+        self.assertEqual(
+            query_one(
+                "SELECT COUNT(*) AS value FROM cash_transactions WHERE source_type='invoice'"
+            )["value"],
+            9,
+        )
 
         clear_business_data()
         init_db(seed=True)
@@ -162,6 +180,26 @@ class DatabaseAndPdfTests(unittest.TestCase):
 
         self.assertEqual(integrity, "ok")
         self.assertEqual(foreign_key_violations, [])
+
+    def test_existing_cash_table_is_migrated_for_contract_links(self):
+        from solar_crm.db import SCHEMA, connect, init_db
+
+        legacy_schema = SCHEMA.replace("    source_type TEXT,\n    source_id INTEGER,\n", "")
+        conn = connect()
+        try:
+            conn.executescript(legacy_schema)
+            conn.commit()
+        finally:
+            conn.close()
+
+        init_db(seed=False)
+        conn = connect()
+        try:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(cash_transactions)").fetchall()}
+        finally:
+            conn.close()
+        self.assertIn("source_type", columns)
+        self.assertIn("source_id", columns)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from datetime import datetime
 from urllib.parse import quote
 
 from solar_crm.db import execute, now_iso, query_one
+from solar_crm.finance import sync_service_contract_to_cash, update_service_contract_cash_status
 
 
 OPPORTUNITY_STAGES = [
@@ -162,6 +163,7 @@ def create_service_contract(values: dict) -> int:
     )
     number = f"CTR-{datetime.now():%Y}-{contract_id:05d}"
     execute("UPDATE service_contracts SET number=? WHERE id=?", (number, contract_id))
+    sync_service_contract_to_cash(contract_id)
     return contract_id
 
 
@@ -169,3 +171,4 @@ def update_contract_status(contract_id: int, status: str) -> None:
     if status not in CONTRACT_STATUSES:
         raise ValueError("Status de contrato inválido.")
     execute("UPDATE service_contracts SET status=?, updated_at=? WHERE id=?", (status, now_iso(), contract_id))
+    update_service_contract_cash_status(contract_id, status)

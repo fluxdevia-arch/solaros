@@ -5,6 +5,7 @@ import streamlit as st
 
 from solar_crm.calculations import contract_monthly_value, money, number_br
 from solar_crm.db import execute, query, query_df, query_one
+from solar_crm.finance import sync_invoice_to_cash
 from solar_crm.ui import client_options, date_br, flash, page_intro, show_flash, status_badge
 
 page_intro("Centralize contatos, escopo contratado, mensalidades e histórico de cobrança do pós-venda.")
@@ -306,7 +307,7 @@ with contract_tab:
                            WHERE client_id=? AND status='Ativo' AND billing_cycle!='Parcela única'""",
                         (client_id,),
                     )
-                    execute(
+                    recurring_contract_id = execute(
                         """INSERT INTO contracts (client_id, plan, start_date, billing_day, base_fee, per_plant_fee, per_kwp_fee, extras_fee, discount_pct, billing_cycle, status, scope, reajust_index, next_reajust_date)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Mensal', 'Ativo', ?, 'IPCA', date(?, '+1 year'))""",
                         (
@@ -314,7 +315,31 @@ with contract_tab:
                             per_kwp, extras, discount, scope.strip(), start_date.isoformat(),
                         ),
                     )
-                    flash("Novo contrato recorrente criado e contrato recorrente anterior encerrado.")
+                    first_amount = contract_monthly_value(
+                        {
+                            "base_fee": base_fee,
+                            "per_plant_fee": per_plant,
+                            "per_kwp_fee": per_kwp,
+                            "extras_fee": extras,
+                            "discount_pct": discount,
+                        },
+                        len(plants),
+                        capacity,
+                    )
+                    first_invoice_id = execute(
+                        """INSERT INTO invoices
+                           (contract_id, reference_month, due_date, amount, status, notes)
+                           VALUES (?, ?, ?, ?, 'Pendente', ?)""",
+                        (
+                            recurring_contract_id,
+                            start_date.replace(day=1).isoformat(),
+                            start_date.replace(day=min(int(billing_day), 28)).isoformat(),
+                            first_amount,
+                            scope.strip() or "Mensalidade de pós-venda.",
+                        ),
+                    )
+                    sync_invoice_to_cash(first_invoice_id)
+                    flash("Contrato recorrente criado e primeira mensalidade lançada no caixa.")
                     st.rerun()
                 elif not consulting_title.strip() or not consulting_scope.strip():
                     st.error("Informe o nome e a descrição do serviço.")
@@ -333,7 +358,7 @@ with contract_tab:
                             min(consulting_due.day, 28), consulting_amount, consulting_scope.strip(),
                         ),
                     )
-                    execute(
+                    consulting_invoice_id = execute(
                         """INSERT INTO invoices
                            (contract_id, reference_month, due_date, amount, status, notes)
                            VALUES (?, ?, ?, ?, 'Pendente', ?)""",
@@ -343,7 +368,8 @@ with contract_tab:
                             consulting_charge_notes.strip() or consulting_scope.strip(),
                         ),
                     )
-                    flash("Consultoria cadastrada e cobrança única lançada com sucesso.")
+                    sync_invoice_to_cash(consulting_invoice_id)
+                    flash("Consultoria cadastrada e valor lançado automaticamente no caixa.")
                     st.rerun()
 
 with billing_tab:
@@ -423,7 +449,7 @@ with billing_tab:
                         st.error("Já existe uma cobrança para este contrato no mês informado.")
                     else:
                         paid_at = date.today().isoformat() if status == "Pago" else None
-                        execute(
+                        invoice_id = execute(
                             """INSERT INTO invoices
                                (contract_id, reference_month, due_date, amount, status, paid_at, notes)
                                VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -432,5 +458,6 @@ with billing_tab:
                                 status, paid_at, notes.strip(),
                             ),
                         )
-                        flash("Cobrança registrada.")
+                        sync_invoice_to_cash(invoice_id)
+                        flash("Cobrança registrada e lançada no caixa.")
                         st.rerun()
