@@ -27,6 +27,7 @@ with st.container(horizontal=True):
     st.metric("Usinas monitoradas", int(metrics["plants"]), border=True)
     st.metric("Potência instalada", f"{number_br(metrics['kwp'], 1)} kWp", border=True)
     st.metric("Receita recorrente", money(metrics["mrr"]), border=True)
+    st.metric("A receber no mês", money(metrics["receivable"]), border=True)
 
 with st.container(horizontal=True):
     st.metric("Geração no mês", f"{number_br(metrics['generation'] / 1000, 1)} MWh", border=True)

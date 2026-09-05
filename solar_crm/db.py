@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -720,6 +720,7 @@ def init_db(seed: bool = True) -> None:
         )
         if seed and fresh_install:
             _seed(conn)
+        _ensure_recurring_invoices(conn, date.today().replace(day=1).isoformat())
         _backfill_cash_entries(conn)
         conn.commit()
     finally:
@@ -824,6 +825,54 @@ def _backfill_cash_entries(conn: sqlite3.Connection | PostgresConnection) -> Non
                  WHERE ct.source_type='service_contract' AND ct.source_id=sc.id
              )"""
     )
+
+
+def _ensure_recurring_invoices(
+    conn: sqlite3.Connection | PostgresConnection,
+    reference_month: str,
+) -> None:
+    """Create the month's invoice for every active monthly contract, once."""
+    month = date.fromisoformat(str(reference_month)[:10]).replace(day=1)
+    month_iso = month.isoformat()
+    month_key = month_iso[:7]
+    contracts = [
+        dict(row)
+        for row in conn.execute(
+            """SELECT c.*, COUNT(p.id) AS plant_count,
+                      COALESCE(SUM(p.installed_kwp), 0) AS total_kwp
+               FROM contracts c
+               LEFT JOIN plants p
+                 ON p.client_id=c.client_id AND p.status!='Desativada'
+               WHERE c.status='Ativo'
+                 AND c.billing_cycle='Mensal'
+                 AND substr(c.start_date, 1, 7) <= ?
+               GROUP BY c.id""",
+            (month_key,),
+        ).fetchall()
+    ]
+    from solar_crm.calculations import contract_monthly_value
+
+    for contract in contracts:
+        due_day = min(max(int(contract.get("billing_day") or 10), 1), 28)
+        due_date = month.replace(day=due_day).isoformat()
+        amount = contract_monthly_value(
+            contract,
+            int(contract["plant_count"] or 0),
+            float(contract["total_kwp"] or 0),
+        )
+        conn.execute(
+            """INSERT INTO invoices
+               (contract_id, reference_month, due_date, amount, status, paid_at, notes)
+               VALUES (?, ?, ?, ?, 'Pendente', NULL, ?)
+               ON CONFLICT(contract_id, reference_month) DO NOTHING""",
+            (
+                contract["id"],
+                month_iso,
+                due_date,
+                amount,
+                contract.get("scope") or "Mensalidade de pós-venda.",
+            ),
+        )
 
 
 def _seed(conn: sqlite3.Connection | PostgresConnection) -> None:
@@ -1153,10 +1202,24 @@ def dashboard_metrics(reference_month: str | None = None) -> dict[str, Any]:
             dict(row)
             for row in conn.execute(
                 """SELECT c.*, COUNT(p.id) AS plant_count, COALESCE(SUM(p.installed_kwp),0) AS total_kwp
-                   FROM contracts c LEFT JOIN plants p ON p.client_id=c.client_id
-                   WHERE c.status='Ativo' GROUP BY c.id"""
+                   FROM contracts c
+                   LEFT JOIN plants p
+                     ON p.client_id=c.client_id AND p.status!='Desativada'
+                   WHERE c.status='Ativo' AND c.billing_cycle='Mensal'
+                   GROUP BY c.id"""
             ).fetchall()
         ]
+        receivable = dict(
+            conn.execute(
+                """SELECT COALESCE(SUM(amount), 0) AS value
+                   FROM cash_transactions
+                   WHERE competence_month=?
+                     AND transaction_type='Receita'
+                     AND status='A receber'
+                     AND deleted_at IS NULL""",
+                (month,),
+            ).fetchone()
+        )["value"]
     finally:
         conn.close()
     from solar_crm.calculations import contract_monthly_value
@@ -1171,6 +1234,7 @@ def dashboard_metrics(reference_month: str | None = None) -> dict[str, Any]:
         "overdue": tasks["overdue"] or 0,
         "open_tasks": tasks["open_tasks"] or 0,
         "mrr": mrr,
+        "receivable": receivable or 0,
     }
 
 

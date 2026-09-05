@@ -1,6 +1,7 @@
 import os
 import unittest
 import uuid
+from datetime import date
 from io import BytesIO
 from pathlib import Path
 
@@ -204,6 +205,81 @@ class DatabaseAndPdfTests(unittest.TestCase):
         self.assertIn("source_type", columns)
         self.assertIn("source_id", columns)
         self.assertIn("deleted_at", columns)
+
+    def test_active_monthly_contracts_are_added_to_cash_without_counting_one_time_as_mrr(self):
+        from solar_crm.db import dashboard_metrics, execute, init_db, query_one
+
+        init_db(seed=False)
+        month = date.today().replace(day=1).isoformat()
+        client_a = execute(
+            """INSERT INTO clients (name, client_type, status)
+               VALUES ('Cliente mensal A', 'Pessoa jurídica', 'Ativo')"""
+        )
+        client_b = execute(
+            """INSERT INTO clients (name, client_type, status)
+               VALUES ('Cliente mensal B', 'Pessoa jurídica', 'Ativo')"""
+        )
+        monthly_a = execute(
+            """INSERT INTO contracts
+               (client_id, plan, start_date, billing_day, base_fee, billing_cycle, status)
+               VALUES (?, 'Mensal A', ?, 10, 600, 'Mensal', 'Ativo')""",
+            (client_a, month),
+        )
+        monthly_b = execute(
+            """INSERT INTO contracts
+               (client_id, plan, start_date, billing_day, base_fee, billing_cycle, status)
+               VALUES (?, 'Mensal B', ?, 15, 600, 'Mensal', 'Ativo')""",
+            (client_b, month),
+        )
+        consulting = execute(
+            """INSERT INTO contracts
+               (client_id, plan, start_date, billing_day, base_fee, billing_cycle, status)
+               VALUES (?, 'Consultoria avulsa', ?, 20, 3000, 'Parcela única', 'Ativo')""",
+            (client_a, month),
+        )
+        execute(
+            """INSERT INTO invoices
+               (contract_id, reference_month, due_date, amount, status, notes)
+               VALUES (?, ?, ?, 3000, 'Pendente', 'Análise técnica')""",
+            (consulting, month, month),
+        )
+
+        # Simulates the first app start after deploying this migration.
+        init_db(seed=False)
+
+        self.assertIsNotNone(
+            query_one(
+                "SELECT id FROM invoices WHERE contract_id=? AND reference_month=?",
+                (monthly_a, month),
+            )
+        )
+        self.assertIsNotNone(
+            query_one(
+                "SELECT id FROM invoices WHERE contract_id=? AND reference_month=?",
+                (monthly_b, month),
+            )
+        )
+        self.assertEqual(
+            query_one(
+                """SELECT COUNT(*) AS value FROM cash_transactions
+                   WHERE competence_month=? AND deleted_at IS NULL""",
+                (month,),
+            )["value"],
+            3,
+        )
+        metrics = dashboard_metrics(month)
+        self.assertEqual(float(metrics["mrr"]), 1200.0)
+        self.assertEqual(float(metrics["receivable"]), 4200.0)
+
+        init_db(seed=False)
+        self.assertEqual(
+            query_one(
+                """SELECT COUNT(*) AS value FROM cash_transactions
+                   WHERE competence_month=? AND deleted_at IS NULL""",
+                (month,),
+            )["value"],
+            3,
+        )
 
 
 if __name__ == "__main__":
