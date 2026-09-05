@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -398,6 +398,7 @@ CREATE TABLE IF NOT EXISTS cash_transactions (
     notes TEXT,
     source_type TEXT,
     source_id INTEGER,
+    deleted_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -743,6 +744,7 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
         cash_additions = {
             "source_type": "TEXT",
             "source_id": "BIGINT",
+            "deleted_at": "TEXT",
         }
         for name, column_type in cash_additions.items():
             conn.execute(f"ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS {name} {column_type}")
@@ -769,6 +771,7 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
     cash_additions = {
         "source_type": "TEXT",
         "source_id": "INTEGER",
+        "deleted_at": "TEXT",
     }
     for name, column_type in cash_additions.items():
         if name not in cash_columns:

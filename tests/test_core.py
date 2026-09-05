@@ -184,7 +184,10 @@ class DatabaseAndPdfTests(unittest.TestCase):
     def test_existing_cash_table_is_migrated_for_contract_links(self):
         from solar_crm.db import SCHEMA, connect, init_db
 
-        legacy_schema = SCHEMA.replace("    source_type TEXT,\n    source_id INTEGER,\n", "")
+        legacy_schema = SCHEMA.replace(
+            "    source_type TEXT,\n    source_id INTEGER,\n    deleted_at TEXT,\n",
+            "",
+        )
         conn = connect()
         try:
             conn.executescript(legacy_schema)
@@ -200,6 +203,7 @@ class DatabaseAndPdfTests(unittest.TestCase):
             conn.close()
         self.assertIn("source_type", columns)
         self.assertIn("source_id", columns)
+        self.assertIn("deleted_at", columns)
 
 
 if __name__ == "__main__":

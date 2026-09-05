@@ -118,7 +118,7 @@ class StreamlitSmokeTest(unittest.TestCase):
         self.assertEqual(updated["notes"], "Cadastro conferido em campo.")
 
     def test_one_time_consulting_contract_creates_detailed_charge(self):
-        from solar_crm.db import query_one
+        from solar_crm.db import init_db, query_one
 
         app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"
         app = AppTest.from_file(app_path, default_timeout=20).run()
@@ -192,6 +192,25 @@ class StreamlitSmokeTest(unittest.TestCase):
         self.assertEqual(edited_cash["status"], "Recebido")
         self.assertEqual(edited_cash["payment_method"], "Pix")
         self.assertIsNotNone(edited_cash["settlement_date"])
+
+        app.checkbox(key="cash_delete_confirm").check().run()
+        app.button(key="cash_delete_submit").click().run()
+        self.assertFalse(app.exception)
+        deleted_cash = query_one("SELECT * FROM cash_transactions WHERE id=?", (cash_entry["id"],))
+        self.assertIsNotNone(deleted_cash["deleted_at"])
+        self.assertIsNone(
+            query_one(
+                "SELECT id FROM cash_transactions WHERE id=? AND deleted_at IS NULL",
+                (cash_entry["id"],),
+            )
+        )
+
+        init_db(seed=True)
+        self.assertIsNotNone(
+            query_one("SELECT deleted_at FROM cash_transactions WHERE id=?", (cash_entry["id"],))[
+                "deleted_at"
+            ]
+        )
 
         if previous_recurring:
             recurring = query_one("SELECT status FROM contracts WHERE id=?", (previous_recurring["id"],))

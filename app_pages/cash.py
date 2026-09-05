@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from solar_crm.calculations import money
-from solar_crm.db import execute, query, query_df
+from solar_crm.db import execute, now_iso, query, query_df
 from solar_crm.ui import date_br, flash, month_label, page_intro, show_flash
 
 
@@ -71,7 +71,10 @@ all_plants = query(
 client_map = {"Sem cliente vinculado": None, **{row["name"]: row["id"] for row in clients}}
 plant_map = {"Sem usina vinculada": None, **{f"{row['name']} · {row['client_name']}": row["id"] for row in plants}}
 
-months = query("SELECT DISTINCT competence_month FROM cash_transactions ORDER BY competence_month DESC")
+months = query(
+    """SELECT DISTINCT competence_month FROM cash_transactions
+       WHERE deleted_at IS NULL ORDER BY competence_month DESC"""
+)
 current_month = date.today().replace(day=1).isoformat()
 month_values = [row["competence_month"] for row in months]
 if current_month not in month_values:
@@ -132,7 +135,7 @@ summary = query_df(
            COALESCE(SUM(CASE WHEN transaction_type='Receita' AND status='A receber' THEN amount ELSE 0 END),0) AS receivable,
            COALESCE(SUM(CASE WHEN transaction_type='Despesa' AND status='A pagar' THEN amount ELSE 0 END),0) AS payable,
            COALESCE(SUM(CASE WHEN transaction_type='Receita' AND category IN ('Manutenção corretiva','Manutenção preventiva','Limpeza de módulos','Visita técnica','Venda de peças') AND status!='Cancelado' THEN amount ELSE 0 END),0) AS maintenance_revenue
-       FROM cash_transactions WHERE competence_month=?""",
+       FROM cash_transactions WHERE competence_month=? AND deleted_at IS NULL""",
     (selected_month,),
 ).iloc[0]
 
@@ -163,7 +166,8 @@ transactions = query_df(
        FROM cash_transactions ct
        LEFT JOIN clients c ON c.id=ct.client_id
        LEFT JOIN plants p ON p.id=ct.plant_id
-       WHERE ct.competence_month=? ORDER BY ct.due_date DESC, ct.id DESC""",
+       WHERE ct.competence_month=? AND ct.deleted_at IS NULL
+       ORDER BY ct.due_date DESC, ct.id DESC""",
     (selected_month,),
 )
 
@@ -346,6 +350,29 @@ with transactions_tab:
                     flash("Lançamento atualizado no caixa.")
                     st.rerun()
 
+            st.divider()
+            st.warning(
+                "A exclusão retira definitivamente este lançamento das movimentações e dos totais do caixa. "
+                "O contrato de origem será preservado.",
+                icon=":material/warning:",
+            )
+            confirm_delete = st.checkbox(
+                "Confirmo que desejo excluir o lançamento selecionado",
+                key="cash_delete_confirm",
+            )
+            if st.button(
+                "Excluir lançamento",
+                icon=":material/delete_forever:",
+                disabled=not confirm_delete,
+                key="cash_delete_submit",
+            ):
+                execute(
+                    "UPDATE cash_transactions SET deleted_at=? WHERE id=? AND deleted_at IS NULL",
+                    (now_iso(), edit_id),
+                )
+                flash("Lançamento excluído do caixa.")
+                st.rerun()
+
         open_rows = transactions[transactions["status"].isin(["A receber", "A pagar"])]
         if not open_rows.empty:
             with st.expander("Dar baixa em lançamento", icon=":material/check_circle:"):
@@ -396,7 +423,9 @@ with flow_tab:
         """SELECT competence_month AS month,
                   SUM(CASE WHEN transaction_type='Receita' AND status='Recebido' THEN amount ELSE 0 END) AS revenue,
                   SUM(CASE WHEN transaction_type='Despesa' AND status='Pago' THEN amount ELSE 0 END) AS expense
-           FROM cash_transactions GROUP BY competence_month ORDER BY competence_month"""
+           FROM cash_transactions
+           WHERE deleted_at IS NULL
+           GROUP BY competence_month ORDER BY competence_month"""
     )
     if flow.empty:
         st.info("O histórico aparecerá após os primeiros lançamentos.")
