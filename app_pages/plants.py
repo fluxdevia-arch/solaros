@@ -5,7 +5,7 @@ import streamlit as st
 
 from solar_crm.calculations import number_br, percent
 from solar_crm.db import execute, query, query_df, query_one
-from solar_crm.ui import client_options, date_br, flash, page_intro, plant_options, show_flash, status_badge
+from solar_crm.ui import client_options, date_br, flash, page_intro, plant_options, render_delete_control, show_flash, status_badge
 
 page_intro("Inventário técnico completo, histórico de desempenho e observações específicas de cada usina.")
 show_flash()
@@ -138,6 +138,14 @@ with technical:
                 flash("Usina atualizada.")
                 st.rerun()
 
+    render_delete_control(
+        "plant",
+        plant_id,
+        f"usina {plant['name']}",
+        state_keys=("selected_plant_id", "report_pdf", "report_key"),
+        extra_warning="As leituras e beneficiárias desta usina deixarão de compor os relatórios.",
+    )
+
 with beneficiaries_tab:
     beneficiaries = query(
         """SELECT * FROM beneficiaries WHERE plant_id=?
@@ -246,6 +254,20 @@ with beneficiaries_tab:
                 "Beneficiária": st.column_config.TextColumn(pinned=True),
                 "Rateio": st.column_config.NumberColumn(format="%.1f%%"),
             },
+        )
+        beneficiary_delete_map = {
+            f"{row['name']} · UC {row['unit_code']}": row for row in beneficiaries
+        }
+        beneficiary_delete_label = st.selectbox(
+            "Beneficiária para administrar",
+            list(beneficiary_delete_map),
+            key="beneficiary_delete_selector",
+        )
+        beneficiary_to_delete = beneficiary_delete_map[beneficiary_delete_label]
+        render_delete_control(
+            "beneficiary",
+            beneficiary_to_delete["id"],
+            f"beneficiária {beneficiary_to_delete['name']}",
         )
     else:
         st.info("Nenhuma unidade beneficiária cadastrada nesta usina.", icon=":material/info:")

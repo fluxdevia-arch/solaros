@@ -18,7 +18,7 @@ from solar_crm.monitoring import (
     sync_mapping,
     update_integration_credentials,
 )
-from solar_crm.ui import date_br, flash, month_label, page_intro, plant_options, show_flash
+from solar_crm.ui import date_br, flash, month_label, page_intro, plant_options, render_delete_control, show_flash
 
 page_intro("Use o SolarZ como central principal para importar usinas, geração diária e desempenho mensal diretamente para o SolarOS.")
 show_flash()
@@ -176,6 +176,13 @@ with accounts_tab:
                         st.rerun()
                     except MonitoringError as exc:
                         st.error(str(exc))
+        connection_to_delete = next(row for row in connections if row["id"] == connection_map[selected_connection])
+        render_delete_control(
+            "integration",
+            connection_to_delete["id"],
+            f"conta de integração {connection_to_delete['name']}",
+            extra_warning="As credenciais, usinas remotas, vínculos e o histórico desta conta serão removidos.",
+        )
     else:
         st.info("Cadastre a primeira conta de API para iniciar a integração.", icon=":material/info:")
 
@@ -232,6 +239,21 @@ with mapping_tab:
             "last_error": "Erro",
         })[["Cliente", "Usina SolarOS", "Portal", "Usina remota", "ID remoto", "Última sincronização", "Resultado", "Erro"]]
         st.dataframe(linked_df, hide_index=True)
+        mapping_delete_map = {
+            f"{row['client_name']} · {row['plant_name']} · {row['provider']}": row
+            for row in mappings
+        }
+        mapping_delete_label = st.selectbox(
+            "Vínculo para administrar",
+            list(mapping_delete_map),
+            key="mapping_delete_selector",
+        )
+        mapping_to_delete = mapping_delete_map[mapping_delete_label]
+        render_delete_control(
+            "plant_integration",
+            mapping_to_delete["id"],
+            f"vínculo de {mapping_to_delete['plant_name']} com {mapping_to_delete['provider']}",
+        )
 
 with sync_tab:
     if not mappings:

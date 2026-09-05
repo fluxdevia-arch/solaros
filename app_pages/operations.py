@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from solar_crm.db import execute, query, query_df, query_one
-from solar_crm.ui import client_options, date_br, flash, page_intro, plant_options, show_flash
+from solar_crm.ui import client_options, date_br, flash, page_intro, plant_options, render_delete_control, show_flash
 
 page_intro("Organize inspeções, limpezas, contatos periódicos, garantias e atendimento de falhas com prioridade e SLA.")
 show_flash()
@@ -81,6 +81,7 @@ with tasks_tab:
            LEFT JOIN plants p ON p.id=t.plant_id ORDER BY t.due_date"""
     )
     if not tasks.empty:
+        all_tasks = tasks.copy()
         today = date.today().isoformat()
         tasks.loc[(tasks["due_date"] < today) & ~tasks["status"].isin(["Concluída", "Cancelada"]), "status"] = "Atrasada"
         if status_filter:
@@ -110,6 +111,9 @@ with tasks_tab:
                         )
                     flash("Atividade atualizada." + (" A próxima recorrência foi criada." if new_status == "Concluída" and task["recurrence"] != "Única" else ""))
                     st.rerun()
+        task_delete_labels = {f"#{row.id} · {row.title}": int(row.id) for row in all_tasks.itertuples()}
+        task_delete_label = st.selectbox("Atividade para administrar", list(task_delete_labels), key="task_delete_selector")
+        render_delete_control("task", task_delete_labels[task_delete_label], task_delete_label)
     else:
         st.success("Nenhuma atividade encontrada.", icon=":material/check_circle:")
 
@@ -141,6 +145,9 @@ with tickets_tab:
                     execute("UPDATE tickets SET status=?, root_cause=?, resolution=?, resolved_at=? WHERE id=?", (status, root_cause, resolution, resolved_at, labels[chosen]))
                     flash("Ocorrência atualizada.")
                     st.rerun()
+        ticket_delete_labels = {f"#{row.id} · {row.title}": int(row.id) for row in tickets.itertuples()}
+        ticket_delete_label = st.selectbox("Ocorrência para administrar", list(ticket_delete_labels), key="ticket_delete_selector")
+        render_delete_control("ticket", ticket_delete_labels[ticket_delete_label], ticket_delete_label)
     else:
         st.success("Nenhuma ocorrência registrada.", icon=":material/check_circle:")
 

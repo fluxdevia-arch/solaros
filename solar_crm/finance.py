@@ -16,7 +16,7 @@ def sync_invoice_to_cash(invoice_id: int) -> int:
     invoice = query_one(
         """SELECT i.*, c.client_id, c.plan, c.scope, c.billing_cycle
            FROM invoices i JOIN contracts c ON c.id=i.contract_id
-           WHERE i.id=?""",
+           WHERE i.id=? AND i.deleted_at IS NULL""",
         (invoice_id,),
     )
     if not invoice:

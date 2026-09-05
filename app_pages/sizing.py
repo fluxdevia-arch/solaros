@@ -18,7 +18,7 @@ from solar_crm.sizing import (
     size_pv_system,
     size_strings,
 )
-from solar_crm.ui import page_intro
+from solar_crm.ui import page_intro, render_delete_control, show_flash
 
 
 NDU_001_URL = "https://www.energisa.com.br/sites/energisa/files/media/documents/2026-01/NDU%20001%20-%20Fornecimento%20de%20Energia%20El%C3%A9trica%20em%20Tens%C3%A3o%20Secund%C3%A1ria%20a%20Edifica%C3%A7%C3%B5es%20Individuais.pdf"
@@ -103,6 +103,7 @@ def build_memorial() -> str:
 
 
 page_intro("Pré-dimensione sistemas residenciais, arranjos CC, inversores, cabos, proteções, eletrodutos e o padrão de entrada da Energisa Paraíba.")
+show_flash()
 st.warning(
     "Ferramenta de apoio técnico. Os resultados não autorizam execução e devem ser validados por profissional habilitado, com dados de fabricante, normas ABNT aplicáveis e padrão vigente da distribuidora.",
     icon=":material/engineering:",
@@ -169,6 +170,13 @@ with catalog_tab:
         module_rows = query("SELECT id, manufacturer, model, power_wp, voc_v, vmp_v, isc_a, imp_a, max_series_fuse_a FROM pv_modules ORDER BY manufacturer, model")
         if module_rows:
             st.dataframe(pd.DataFrame(module_rows), hide_index=True)
+            module_delete_map = {
+                f"{row['manufacturer'] or ''} {row['model']} · {row['power_wp']:.0f} Wp".strip(): row
+                for row in module_rows
+            }
+            module_delete_label = st.selectbox("Módulo para administrar", list(module_delete_map), key="module_delete_selector")
+            module_to_delete = module_delete_map[module_delete_label]
+            render_delete_control("pv_module", module_to_delete["id"], f"módulo {module_to_delete['model']}")
 
     with inverter_catalog:
         with st.form("new_pv_inverter"):
@@ -222,6 +230,13 @@ with catalog_tab:
         inverter_rows = query("SELECT id, manufacturer, model, nominal_power_kw, max_dc_voltage_v, mppt_min_v, mppt_max_v, mppt_count, strings_per_mppt, max_input_current_mppt_a FROM pv_inverters ORDER BY manufacturer, model")
         if inverter_rows:
             st.dataframe(pd.DataFrame(inverter_rows), hide_index=True)
+            inverter_delete_map = {
+                f"{row['manufacturer'] or ''} {row['model']} · {row['nominal_power_kw']:.1f} kW".strip(): row
+                for row in inverter_rows
+            }
+            inverter_delete_label = st.selectbox("Inversor para administrar", list(inverter_delete_map), key="inverter_delete_selector")
+            inverter_to_delete = inverter_delete_map[inverter_delete_label]
+            render_delete_control("pv_inverter", inverter_to_delete["id"], f"inversor {inverter_to_delete['model']}")
 
 with project_tab:
     modules = query("""SELECT id, manufacturer, model, power_wp, voc_v, vmp_v, isc_a, imp_a,
@@ -347,12 +362,26 @@ with project_tab:
                     except ValueError as exc:
                         st.error(str(exc))
 
-    saved_projects = query("""SELECT sp.number, sp.name, c.name AS client_name, sp.module_count,
+    saved_projects = query("""SELECT sp.id, sp.number, sp.name, c.name AS client_name, sp.module_count,
                                      sp.status, sp.created_at FROM sizing_projects sp
                               LEFT JOIN clients c ON c.id=sp.client_id ORDER BY sp.created_at DESC""")
     if saved_projects:
         st.subheader("Projetos salvos", icon=":material/history:")
         st.dataframe(pd.DataFrame(saved_projects), hide_index=True)
+        project_delete_map = {
+            f"{row['number']} · {row['name']}": row for row in saved_projects
+        }
+        project_delete_label = st.selectbox(
+            "Projeto para administrar",
+            list(project_delete_map),
+            key="sizing_project_delete_selector",
+        )
+        project_to_delete = project_delete_map[project_delete_label]
+        render_delete_control(
+            "sizing_project",
+            project_to_delete["id"],
+            f"projeto de dimensionamento {project_to_delete['number']}",
+        )
 
 with system_tab:
     left, right = st.columns([1.05, 0.95])

@@ -6,7 +6,7 @@ import streamlit as st
 
 from solar_crm.db import query, query_df, query_one
 from solar_crm.document_cache import service_order_pdf
-from solar_crm.ui import date_br, flash, page_intro, show_flash
+from solar_crm.ui import date_br, flash, page_intro, render_delete_control, show_flash
 from solar_crm.workflow import (
     SERVICE_ORDER_STATUSES,
     create_service_order,
@@ -178,5 +178,10 @@ if orders:
                 update_service_order(selected_order["id"], new_status, notes, new_assignee)
                 flash("Ordem de serviço atualizada.")
                 st.rerun()
+    render_delete_control(
+        "service_order",
+        selected_order["id"],
+        f"ordem de serviço {selected_order['number']}",
+    )
 else:
     st.info("Nenhuma ordem de serviço emitida.", icon=":material/info:")

@@ -106,3 +106,57 @@ def format_dashboard_value(kind: str, value: float) -> str:
     if kind == "energy":
         return f"{number_br(value / 1000, 1)} MWh"
     return number_br(value)
+
+
+def render_delete_control(
+    entity: str,
+    record_id: int,
+    record_label: str,
+    *,
+    state_keys: tuple[str, ...] = (),
+    extra_warning: str | None = None,
+) -> None:
+    """Render a consistent, confirmed deletion control for a selected record."""
+    from solar_crm.data_cache import clear_dashboard_caches
+    from solar_crm.deletion import DeletionBlocked, deletion_impact, delete_record
+    from solar_crm.document_cache import clear_document_caches
+
+    safe_key = f"delete_{entity}_{int(record_id)}"
+    with st.expander(f"Excluir {record_label}", icon=":material/delete:"):
+        st.warning("Esta exclusão é permanente e não poderá ser desfeita.", icon=":material/warning:")
+        if extra_warning:
+            st.caption(extra_warning)
+        impact = deletion_impact(entity, int(record_id))
+        if impact:
+            st.write("Também serão afetados:")
+            for item in impact:
+                st.write(f"• {item}")
+        with st.form(safe_key):
+            confirmed = st.checkbox(
+                f"Confirmo que desejo excluir permanentemente: {record_label}",
+                key=f"{safe_key}_confirmed",
+            )
+            submitted = st.form_submit_button(
+                "Excluir permanentemente",
+                type="primary",
+                icon=":material/delete_forever:",
+                key=f"{safe_key}_submit",
+            )
+        if submitted:
+            if not confirmed:
+                st.error("Marque a confirmação antes de excluir.")
+                return
+            try:
+                delete_record(entity, int(record_id))
+            except DeletionBlocked as exc:
+                st.error(str(exc))
+                return
+            except Exception:
+                st.error("Não foi possível concluir a exclusão. O registro pode estar vinculado a outro item; atualize a página e tente novamente.")
+                return
+            for key in state_keys:
+                st.session_state.pop(key, None)
+            clear_dashboard_caches()
+            clear_document_caches()
+            flash(f"{record_label.capitalize()} excluído(a) com sucesso.")
+            st.rerun()

@@ -6,7 +6,7 @@ import streamlit as st
 from solar_crm.calculations import contract_monthly_value, money, number_br
 from solar_crm.db import execute, query, query_df, query_one
 from solar_crm.finance import sync_invoice_to_cash
-from solar_crm.ui import client_options, date_br, flash, page_intro, show_flash, status_badge
+from solar_crm.ui import client_options, date_br, flash, page_intro, render_delete_control, show_flash, status_badge
 
 page_intro("Centralize contatos, escopo contratado, mensalidades e histórico de cobrança do pós-venda.")
 show_flash()
@@ -172,6 +172,14 @@ with profile_tab:
     else:
         st.caption("Nenhuma usina vinculada.")
 
+    render_delete_control(
+        "client",
+        client_id,
+        f"cliente {client['name']}",
+        state_keys=("selected_client_id", "report_pdf", "report_key"),
+        extra_warning="Usinas, cobranças, documentos e registros operacionais vinculados serão tratados conforme a lista abaixo.",
+    )
+
 with contract_tab:
     st.subheader("Pós-venda recorrente", icon=":material/autorenew:")
     if recurring_contract:
@@ -204,7 +212,7 @@ with contract_tab:
                       COALESCE(i.status, 'Sem cobrança') AS billing_status,
                       COALESCE(i.notes, c.scope, '') AS description
                FROM contracts c
-               LEFT JOIN invoices i ON i.contract_id=c.id
+               LEFT JOIN invoices i ON i.contract_id=c.id AND i.deleted_at IS NULL
                WHERE c.client_id=? AND c.billing_cycle='Parcela única'
                ORDER BY c.id DESC, i.reference_month DESC""",
             (client_id,),
@@ -372,13 +380,30 @@ with contract_tab:
                     flash("Consultoria cadastrada e valor lançado automaticamente no caixa.")
                     st.rerun()
 
+    if contracts:
+        contract_delete_map = {
+            f"#{row['id']} · {row['plan']} · {row['billing_cycle']} · {row['status']}": row
+            for row in contracts
+        }
+        contract_delete_label = st.selectbox(
+            "Contrato para administrar",
+            list(contract_delete_map),
+            key="client_contract_delete_selector",
+        )
+        contract_to_delete = contract_delete_map[contract_delete_label]
+        render_delete_control(
+            "contract",
+            contract_to_delete["id"],
+            f"contrato {contract_to_delete['plan']}",
+        )
+
 with billing_tab:
     invoices = query_df(
         """SELECT c.plan AS contract_name, i.reference_month AS reference_month,
                   i.due_date AS due_date, i.amount AS amount, i.status AS invoice_status,
                   i.paid_at AS paid_at, i.notes AS notes
            FROM invoices i JOIN contracts c ON c.id=i.contract_id
-           WHERE c.client_id=? ORDER BY i.reference_month DESC""",
+           WHERE c.client_id=? AND i.deleted_at IS NULL ORDER BY i.reference_month DESC""",
         (client_id,),
     ).rename(columns={
         "contract_name": "Contrato/serviço", "reference_month": "Referência",
@@ -442,22 +467,54 @@ with billing_tab:
                 ):
                     reference_month = ref.replace(day=1).isoformat()
                     duplicate = query_one(
-                        "SELECT id FROM invoices WHERE contract_id=? AND reference_month=?",
+                        "SELECT id, deleted_at FROM invoices WHERE contract_id=? AND reference_month=?",
                         (billing_contract["id"], reference_month),
                     )
-                    if duplicate:
+                    if duplicate and not duplicate["deleted_at"]:
                         st.error("Já existe uma cobrança para este contrato no mês informado.")
                     else:
                         paid_at = date.today().isoformat() if status == "Pago" else None
-                        invoice_id = execute(
-                            """INSERT INTO invoices
-                               (contract_id, reference_month, due_date, amount, status, paid_at, notes)
-                               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                            (
-                                billing_contract["id"], reference_month, due.isoformat(), amount,
-                                status, paid_at, notes.strip(),
-                            ),
-                        )
+                        if duplicate:
+                            invoice_id = duplicate["id"]
+                            execute(
+                                """UPDATE invoices SET due_date=?, amount=?, status=?, paid_at=?,
+                                   notes=?, deleted_at=NULL WHERE id=?""",
+                                (due.isoformat(), amount, status, paid_at, notes.strip(), invoice_id),
+                            )
+                        else:
+                            invoice_id = execute(
+                                """INSERT INTO invoices
+                                   (contract_id, reference_month, due_date, amount, status, paid_at, notes)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                                (
+                                    billing_contract["id"], reference_month, due.isoformat(), amount,
+                                    status, paid_at, notes.strip(),
+                                ),
+                            )
                         sync_invoice_to_cash(invoice_id)
                         flash("Cobrança registrada e lançada no caixa.")
                         st.rerun()
+
+    invoice_rows = query(
+        """SELECT i.id, i.reference_month, i.amount, i.status, c.plan
+           FROM invoices i JOIN contracts c ON c.id=i.contract_id
+           WHERE c.client_id=? AND i.deleted_at IS NULL
+           ORDER BY i.reference_month DESC, i.id DESC""",
+        (client_id,),
+    )
+    if invoice_rows:
+        invoice_delete_map = {
+            f"FAT-{row['id']} · {row['plan']} · {row['reference_month'][:7]} · {money(row['amount'])}": row
+            for row in invoice_rows
+        }
+        invoice_delete_label = st.selectbox(
+            "Cobrança para administrar",
+            list(invoice_delete_map),
+            key="client_invoice_delete_selector",
+        )
+        invoice_to_delete = invoice_delete_map[invoice_delete_label]
+        render_delete_control(
+            "invoice",
+            invoice_to_delete["id"],
+            f"cobrança FAT-{invoice_to_delete['id']}",
+        )

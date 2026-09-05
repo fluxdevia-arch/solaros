@@ -117,6 +117,21 @@ class StreamlitSmokeTest(unittest.TestCase):
         self.assertEqual(updated["state"], "PB")
         self.assertEqual(updated["notes"], "Cadastro conferido em campo.")
 
+    def test_client_can_be_deleted_with_explicit_confirmation(self):
+        from solar_crm.db import query_one
+
+        app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        app = AppTest.from_file(app_path, default_timeout=20).run()
+        app.switch_page("app_pages/clients.py").run()
+        self.assertFalse(app.exception)
+
+        client_id = app.session_state["selected_client_id"]
+        app.checkbox(key=f"delete_client_{client_id}_confirmed").set_value(True)
+        app.button(key=f"delete_client_{client_id}_submit").click().run()
+
+        self.assertFalse(app.exception)
+        self.assertIsNone(query_one("SELECT id FROM clients WHERE id=?", (client_id,)))
+
     def test_one_time_consulting_contract_creates_detailed_charge(self):
         from solar_crm.db import init_db, query_one
 

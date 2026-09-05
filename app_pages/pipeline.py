@@ -4,7 +4,7 @@ import streamlit as st
 
 from solar_crm.calculations import money
 from solar_crm.db import query, query_one
-from solar_crm.ui import date_br, flash, page_intro, show_flash
+from solar_crm.ui import date_br, flash, page_intro, render_delete_control, show_flash
 from solar_crm.workflow import OPPORTUNITY_STAGES, create_opportunity, move_opportunity, set_opportunity_stage
 
 
@@ -115,3 +115,19 @@ result_columns = st.columns(2)
 for column, stage in zip(result_columns, OPPORTUNITY_STAGES[4:]):
     with column:
         render_stage(stage, [row for row in opportunities if row["stage"] == stage])
+
+if opportunities:
+    opportunity_delete_map = {
+        f"#{row['id']} · {row['lead_name']} · {row['stage']}": row for row in opportunities
+    }
+    opportunity_delete_label = st.selectbox(
+        "Oportunidade para administrar",
+        list(opportunity_delete_map),
+        key="opportunity_delete_selector",
+    )
+    opportunity_to_delete = opportunity_delete_map[opportunity_delete_label]
+    render_delete_control(
+        "opportunity",
+        opportunity_to_delete["id"],
+        f"oportunidade {opportunity_to_delete['lead_name']}",
+    )

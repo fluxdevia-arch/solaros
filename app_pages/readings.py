@@ -7,7 +7,7 @@ import streamlit as st
 
 from solar_crm.calculations import calculate_coverage, calculate_performance, calculate_savings, money, number_br, percent
 from solar_crm.db import available_months, query, query_df, query_one, upsert_beneficiary_reading, upsert_reading
-from solar_crm.ui import date_br, flash, month_label, page_intro, plant_options, show_flash
+from solar_crm.ui import date_br, flash, month_label, page_intro, plant_options, render_delete_control, show_flash
 
 page_intro("Registre consumo, geração, compensação e valores da concessionária para calcular economia e desempenho.")
 show_flash()
@@ -306,3 +306,29 @@ st.download_button(
     "text/csv",
     icon=":material/download:",
 )
+
+reading_rows = query(
+    """SELECT r.id, r.reference_month, p.name AS plant_name, c.name AS client_name
+       FROM readings r JOIN plants p ON p.id=r.plant_id
+       JOIN clients c ON c.id=p.client_id
+       WHERE r.reference_month=? ORDER BY c.name, p.name""",
+    (selected_month,),
+)
+if reading_rows:
+    reading_delete_map = {
+        f"{row['client_name']} · {row['plant_name']} · {month_label(row['reference_month'])}": row
+        for row in reading_rows
+    }
+    reading_delete_label = st.selectbox(
+        "Leitura/relatório para administrar",
+        list(reading_delete_map),
+        key="reading_delete_selector",
+    )
+    reading_to_delete = reading_delete_map[reading_delete_label]
+    render_delete_control(
+        "reading",
+        reading_to_delete["id"],
+        f"leitura de {reading_to_delete['plant_name']} em {month_label(reading_to_delete['reference_month'])}",
+        state_keys=("report_pdf", "report_key"),
+        extra_warning="O relatório desse período deixará de usar esta leitura e os respectivos rateios.",
+    )

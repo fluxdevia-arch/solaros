@@ -8,9 +8,10 @@ import streamlit as st
 from solar_crm.calculations import calculate_coverage, calculate_savings, money, number_br, percent
 from solar_crm.db import available_months, query, query_df, query_one
 from solar_crm.pdf_report import generate_client_report
-from solar_crm.ui import client_options, month_label, page_intro
+from solar_crm.ui import client_options, month_label, page_intro, render_delete_control, show_flash
 
 page_intro("Gere um demonstrativo PDF pronto para enviar ao cliente, com consumo, geração, economia, falhas e ações do período.")
+show_flash()
 
 clients = query("SELECT id, name FROM clients WHERE status='Ativo' ORDER BY name")
 months = available_months()
@@ -130,5 +131,26 @@ with st.container(border=True):
             type="primary",
             icon=":material/download:",
         )
+
+report_readings = query(
+    """SELECT r.id, p.name AS plant_name FROM readings r
+       JOIN plants p ON p.id=r.plant_id
+       WHERE p.client_id=? AND r.reference_month=? ORDER BY p.name""",
+    (client_id, reference_month),
+)
+if report_readings:
+    report_reading_map = {f"{row['plant_name']} · {month_label(reference_month)}": row for row in report_readings}
+    report_reading_label = st.selectbox(
+        "Dados do relatório para administrar",
+        list(report_reading_map),
+        key="report_reading_delete_selector",
+    )
+    report_reading = report_reading_map[report_reading_label]
+    render_delete_control(
+        "reading",
+        report_reading["id"],
+        f"dados de {report_reading['plant_name']} neste relatório",
+        state_keys=("report_pdf", "report_key"),
+    )
 
 st.caption("Privacidade: o PDF é gerado localmente. Revise os dados pessoais antes de compartilhar por e-mail ou mensageiro.")

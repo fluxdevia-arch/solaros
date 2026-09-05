@@ -24,7 +24,7 @@ from solar_crm.inspections import (
     inspection_share_url,
     update_inspection,
 )
-from solar_crm.ui import date_br, flash, page_intro, show_flash
+from solar_crm.ui import date_br, flash, page_intro, render_delete_control, show_flash
 
 
 INSPECTION_TYPES = [
@@ -72,6 +72,11 @@ def _show_saved_photos(inspection_id: int) -> None:
             with columns[offset].container(border=True):
                 st.image(bytes(photo["image_data"]), width="stretch")
                 st.caption(f"{photo['category']} · {photo.get('caption') or photo.get('filename') or 'Sem legenda'}")
+                render_delete_control(
+                    "inspection_photo",
+                    photo["id"],
+                    f"foto {photo.get('filename') or photo['id']}",
+                )
 
 
 def _render_field_form(inspection: dict) -> None:
@@ -361,5 +366,12 @@ if inspections:
     if evidence.open:
         with evidence:
             _show_saved_photos(selected["id"])
+    render_delete_control(
+        "inspection",
+        selected["id"],
+        f"vistoria {selected['number']}",
+        state_keys=("selected_inspection_id",),
+        extra_warning="O relatório PDF poderá ser gerado novamente somente enquanto esta vistoria existir.",
+    )
 else:
     st.info("Nenhuma vistoria cadastrada. Crie a primeira ficha para enviar à equipe de campo.", icon=":material/info:")

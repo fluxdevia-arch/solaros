@@ -8,7 +8,7 @@ from solar_crm.branding import configured_app_name, configured_logo
 from solar_crm.db import query, query_one
 from solar_crm.document_cache import proposal_pdf
 from solar_crm.records import PROPOSAL_STATUSES, create_proposal, update_proposal_status
-from solar_crm.ui import date_br, flash, page_intro, show_flash
+from solar_crm.ui import date_br, flash, page_intro, render_delete_control, show_flash
 
 
 PROPOSAL_TEMPLATES = {
@@ -160,5 +160,10 @@ with history_tab:
                 update_proposal_status(selected["id"], new_status)
                 flash("Situação da proposta atualizada.")
                 st.rerun()
+        render_delete_control(
+            "proposal",
+            selected["id"],
+            f"proposta/orçamento {selected['number']}",
+        )
 
 st.caption("Revise valores, impostos, responsabilidades, prazos e exclusões antes do envio ao cliente.")

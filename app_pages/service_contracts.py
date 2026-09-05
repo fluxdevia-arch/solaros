@@ -6,7 +6,7 @@ import streamlit as st
 from solar_crm.calculations import money
 from solar_crm.db import query
 from solar_crm.document_cache import service_contract_pdf
-from solar_crm.ui import date_br, flash, page_intro, show_flash
+from solar_crm.ui import date_br, flash, page_intro, render_delete_control, show_flash
 from solar_crm.workflow import CONTRACT_STATUSES, create_service_contract, update_contract_status
 
 
@@ -123,6 +123,11 @@ if contracts:
             update_contract_status(selected["id"], new_status)
             flash("Situação do contrato atualizada.")
             st.rerun()
+    render_delete_control(
+        "service_contract",
+        selected["id"],
+        f"contrato de serviço {selected['number']}",
+    )
 else:
     st.info("Nenhum contrato de serviço gerado.", icon=":material/info:")
 

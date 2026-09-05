@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -377,6 +377,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     status TEXT NOT NULL DEFAULT 'Pendente',
     paid_at TEXT,
     notes TEXT,
+    deleted_at TEXT,
     UNIQUE(contract_id, reference_month)
 );
 
@@ -751,6 +752,7 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
         }
         for name, column_type in cash_additions.items():
             conn.execute(f"ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS {name} {column_type}")
+        conn.execute("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS deleted_at TEXT")
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_source ON cash_transactions(source_type, source_id)"
         )
@@ -779,6 +781,9 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
     for name, column_type in cash_additions.items():
         if name not in cash_columns:
             conn.execute(f"ALTER TABLE cash_transactions ADD COLUMN {name} {column_type}")
+    invoice_columns = {row[1] for row in conn.execute("PRAGMA table_info(invoices)").fetchall()}
+    if "deleted_at" not in invoice_columns:
+        conn.execute("ALTER TABLE invoices ADD COLUMN deleted_at TEXT")
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_source ON cash_transactions(source_type, source_id)"
     )
@@ -803,7 +808,8 @@ def _backfill_cash_entries(conn: sqlite3.Connection | PostgresConnection) -> Non
                   'invoice', i.id
            FROM invoices i
            JOIN contracts c ON c.id=i.contract_id
-           WHERE NOT EXISTS (
+           WHERE i.deleted_at IS NULL
+             AND NOT EXISTS (
                SELECT 1 FROM cash_transactions ct
                WHERE ct.source_type='invoice' AND ct.source_id=i.id
            )"""
