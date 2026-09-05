@@ -11,12 +11,14 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="auto",
 )
-st.logo(str(APP_LOGO), size="large")
 
 field_order_mode = bool(str(st.query_params.get("os") or "").strip())
 field_inspection_mode = bool(str(st.query_params.get("inspection") or "").strip())
 field_mode = field_order_mode or field_inspection_mode
 authenticated = False if field_mode else require_login()
+
+if field_mode:
+    st.logo(str(APP_LOGO), size="large")
 
 
 @st.cache_resource(show_spinner=False)
@@ -76,13 +78,16 @@ pages = {
     ],
 }
 
-page = st.navigation(pages, position="sidebar")
-
 with st.sidebar:
+    st.image(str(APP_LOGO), width="stretch")
     st.markdown(f"### {APP_NAME}")
     st.caption("Operação, pós-venda e engenharia solar · v2.1")
     st.caption("Banco em nuvem" if using_postgres() else "Banco local")
     st.divider()
+
+page = st.navigation(pages, position="sidebar")
+
+with st.sidebar:
     render_user_sidebar(authenticated)
 
 st.title(page.title, icon=page.icon)

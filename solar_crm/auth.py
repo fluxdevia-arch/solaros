@@ -34,7 +34,7 @@ def require_login() -> bool:
 
     if not st.user.is_logged_in:
         with st.container(horizontal_alignment="center"):
-            st.image(str(APP_LOGO), width=320)
+            st.image(str(APP_LOGO), width=380)
             st.title(APP_NAME, text_alignment="center")
             st.subheader("Gestão profissional de energia solar", text_alignment="center")
         with st.container(border=True):
