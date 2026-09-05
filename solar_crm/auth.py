@@ -20,12 +20,12 @@ def authentication_required() -> bool:
     return as_bool(configured, default=bool(database_url()))
 
 
-def require_login() -> bool:
+def require_login(app_name: str = APP_NAME, app_logo=APP_LOGO) -> bool:
     """Render the secure login boundary. Returns False only in local development mode."""
     configured = authentication_configured()
     if not configured:
         if authentication_required():
-            st.error("A autenticação do SolarOS ainda não foi configurada.", icon=":material/lock:")
+            st.error(f"A autenticação do {app_name} ainda não foi configurada.", icon=":material/lock:")
             st.info(
                 "Cadastre a seção [auth] nos segredos da hospedagem antes de liberar o sistema."
             )
@@ -34,26 +34,26 @@ def require_login() -> bool:
 
     if not st.user.is_logged_in:
         with st.container(horizontal_alignment="center"):
-            st.image(str(APP_LOGO), width=380)
-            st.title(APP_NAME, text_alignment="center")
+            st.image(app_logo, width=380)
+            st.title(app_name, text_alignment="center")
             st.subheader("Gestão profissional de energia solar", text_alignment="center")
         with st.container(border=True):
             st.markdown("#### Acesso restrito")
             st.write("Entre com seu e-mail e sua senha para acessar os dados da empresa.")
             if st.button(
-                f"Entrar no {APP_NAME}",
+                f"Entrar no {app_name}",
                 type="primary",
                 icon=":material/login:",
                 width="stretch",
             ):
                 st.login()
-        st.caption("As credenciais são protegidas pelo provedor de identidade e não ficam salvas no SolarOS.")
+        st.caption("As credenciais são protegidas pelo provedor de identidade e não ficam salvas no sistema.")
         st.stop()
 
     email = str(getattr(st.user, "email", "") or "").strip().lower()
     permitted = allowed_emails()
     if permitted and email not in permitted:
-        st.error("Este usuário não tem permissão para acessar o SolarOS.", icon=":material/block:")
+        st.error(f"Este usuário não tem permissão para acessar o {app_name}.", icon=":material/block:")
         st.write(f"Conta autenticada: {email or 'e-mail não informado'}")
         if st.button("Sair", icon=":material/logout:"):
             st.logout()

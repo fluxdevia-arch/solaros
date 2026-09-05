@@ -4,7 +4,8 @@ import pandas as pd
 import streamlit as st
 
 from solar_crm.calculations import money
-from solar_crm.db import query
+from solar_crm.branding import configured_app_name, configured_logo
+from solar_crm.db import query, query_one
 from solar_crm.document_cache import proposal_pdf
 from solar_crm.records import PROPOSAL_STATUSES, create_proposal, update_proposal_status
 from solar_crm.ui import date_br, flash, page_intro, show_flash
@@ -40,10 +41,12 @@ PROPOSAL_TEMPLATES = {
 
 page_intro("Crie, acompanhe e emita propostas comerciais profissionais para serviços, consultorias e projetos solares.")
 show_flash()
+company = query_one("SELECT * FROM settings WHERE id=1")
+app_name = configured_app_name(company)
 
 with st.container(horizontal=True, vertical_alignment="center"):
-    st.image("assets/ongrid_logo.png", width=300)
-    st.caption("As propostas em PDF usam automaticamente a identidade visual da OnGrid Energia Solar e a assinatura técnica configurada no SolarOS.")
+    st.image(configured_logo(company), width=300)
+    st.caption(f"As propostas em PDF usam automaticamente a identidade visual e a assinatura técnica configuradas no {app_name}.")
 
 clients = query("SELECT id, name FROM clients WHERE status='Ativo' ORDER BY name")
 opportunities = query(
@@ -112,7 +115,7 @@ with create_tab:
                     "notes": notes,
                     "status": "Rascunho",
                 })
-                flash("Proposta criada com a identidade visual da OnGrid.")
+                flash(f"Proposta criada com a identidade visual de {company['company_name']}.")
                 st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
@@ -144,9 +147,9 @@ with history_tab:
             st.write(f"**{selected['title']}**")
             st.caption(f"{money(selected['amount'])} · válida até {date_br(selected['valid_until'])} · {selected['status']}")
             st.download_button(
-                "Baixar proposta OnGrid em PDF",
+                "Baixar proposta em PDF",
                 proposal_pdf(selected["id"], str(selected.get("updated_at") or "")),
-                file_name=f"{selected['number'].lower()}-ongrid.pdf",
+                file_name=f"{selected['number'].lower()}-proposta.pdf",
                 mime="application/pdf",
                 type="primary",
                 icon=":material/download:",

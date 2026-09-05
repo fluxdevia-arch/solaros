@@ -122,6 +122,33 @@ class DatabaseAndPdfTests(unittest.TestCase):
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 6000)
 
+    def test_white_label_settings_and_logo_normalization(self):
+        from solar_crm.branding import configured_app_name, configured_logo, normalize_brand_logo
+        from solar_crm.db import execute, init_db, query_one
+
+        init_db(seed=False)
+        settings = query_one("SELECT * FROM settings WHERE id=1")
+        self.assertEqual(settings["app_name"], "SolarOS By OnGrid")
+        self.assertIn("brand_logo", settings)
+
+        source = Image.new("RGBA", (2400, 900), (15, 90, 170, 128))
+        raw = BytesIO()
+        source.save(raw, format="PNG")
+        normalized = normalize_brand_logo(raw.getvalue())
+        with Image.open(BytesIO(normalized)) as result:
+            self.assertEqual(result.mode, "RGBA")
+            self.assertLessEqual(result.width, 1800)
+            self.assertLessEqual(result.height, 700)
+            self.assertEqual(result.getpixel((0, 0))[3], 128)
+
+        execute(
+            "UPDATE settings SET app_name=?, brand_logo=?, brand_logo_mime='image/png' WHERE id=1",
+            ("Portal Solar Cliente", normalized),
+        )
+        customized = query_one("SELECT * FROM settings WHERE id=1")
+        self.assertEqual(configured_app_name(customized), "Portal Solar Cliente")
+        self.assertEqual(configured_logo(customized), normalized)
+
     def test_seeded_database_integrity(self):
         from solar_crm.db import connect, init_db
 

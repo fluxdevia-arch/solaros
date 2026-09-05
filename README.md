@@ -17,7 +17,7 @@ Sistema profissional para estruturar o pós-venda e o pré-dimensionamento de pr
 - Atualização da O.S. pelo técnico e possibilidade de invalidar o link anterior.
 - Vistorias técnicas mobile-first, vinculadas a cliente, usina e ordem de serviço, com link individual para a equipe de campo.
 - Checklist elétrico e fotovoltaico, posição solar, sombreamento, coordenadas, medições CC/CA, aterramento, diagnóstico, retorno e até 20 fotos por vistoria.
-- Relatório fotográfico de vistoria em PDF com identidade OnGrid, resultados destacados e assinatura técnica padronizada.
+- Relatório fotográfico de vistoria em PDF com identidade visual configurável, resultados destacados e assinatura técnica padronizada.
 - Gerador de contratos para pós-venda, manutenção, consultoria e projetos, com histórico e PDF.
 - Cálculo de cobertura, desempenho, disponibilidade e economia estimada.
 - Agenda de limpeza, prevenção, relacionamento e relatórios recorrentes.
@@ -28,12 +28,13 @@ Sistema profissional para estruturar o pós-venda e o pré-dimensionamento de pr
 - Área de engenharia para pré-dimensionar sistema FV, strings, inversor, cabos CC/CA, disjuntores e eletrodutos.
 - Catálogo técnico de módulos e inversores com anexo dos datasheets e leitura local assistida de parâmetros em PDFs textuais.
 - Projeto fotovoltaico completo com distribuição balanceada por strings/MPPT, cabos CC e CA, fusível gPV, seccionamento, DPS e croqui sobre foto da cobertura.
-- Propostas comerciais em PDF para consultoria, projeto, manutenção e pós-venda, com histórico, status, assinatura técnica e identidade visual OnGrid Energia Solar.
+- Propostas comerciais em PDF para consultoria, projeto, manutenção e pós-venda, com histórico, status, assinatura técnica e identidade visual configurável.
 - Consulta guiada ao padrão de entrada residencial da Energisa PB, com referência às tabelas da NDU 001.
 - Memorial de pré-dimensionamento para download.
 - Caixa gerencial com receitas, despesas, faturamento de manutenção, contas a receber/pagar e fluxo mensal.
 - Assinatura do responsável técnico e detalhamento por unidade beneficiária no relatório PDF, configuráveis no sistema.
 - Upload de assinatura manuscrita em PNG/JPG, com remoção automática do fundo e posicionamento acima da linha.
+- Modo white-label por instalação, com nome e logotipo próprios no login, menu e documentos.
 
 O banco é iniciado uma única vez com dados demonstrativos para permitir avaliação imediata. Quando quiser começar a operação real, use **Configurações > Preparar base para uso real** e confirme a limpeza. Os dados de exemplo não serão recriados.
 
@@ -65,6 +66,10 @@ O projeto está preparado para Streamlit Community Cloud, banco PostgreSQL do
 Supabase e login por e-mail e senha do Auth0. Consulte o passo a passo completo
 em [DEPLOYMENT.md](DEPLOYMENT.md). Os segredos reais nunca devem ser enviados ao
 GitHub; use `.streamlit/secrets.toml.example` apenas como modelo.
+
+Para comercializar a solução, use uma instalação e um banco separados por
+empresa. O modelo atual e os requisitos de uma futura versão SaaS multiempresa
+estão documentados em [docs/WHITE_LABEL_AND_SAAS.md](docs/WHITE_LABEL_AND_SAAS.md).
 
 ## Dados e backup
 

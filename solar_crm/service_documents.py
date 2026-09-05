@@ -11,6 +11,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from solar_crm.branding import configured_app_name, configured_logo
 from solar_crm.calculations import money
 from solar_crm.db import query_one
 from solar_crm.ui import date_br
@@ -55,9 +56,29 @@ def _footer(canvas, doc, company: dict, label: str) -> None:
 
 
 def _header(company: dict, title: str, subtitle: str, styles) -> list:
+    brand: object = Paragraph(_safe(company["company_name"]), styles["DocBrand"])
+    try:
+        logo_source = configured_logo(company)
+        logo = Image(BytesIO(logo_source) if isinstance(logo_source, bytes) else str(logo_source))
+        scale = min(6.4 * cm / logo.imageWidth, 1.65 * cm / logo.imageHeight)
+        logo.drawWidth = logo.imageWidth * scale
+        logo.drawHeight = logo.imageHeight * scale
+        brand = logo
+    except Exception:
+        pass
+    identity = Table(
+        [[brand, Paragraph(_safe(company.get("legal_name") or company["company_name"]), styles["DocRight"])]],
+        colWidths=[10.6 * cm, 6.6 * cm],
+    )
+    identity.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
     return [
-        Paragraph(_safe(company["company_name"]), styles["DocBrand"]),
-        Paragraph(_safe(company.get("legal_name") or company["company_name"]), styles["DocSmall"]),
+        identity,
         Paragraph(_safe(title), styles["DocTitle"]),
         Paragraph(_safe(subtitle), styles["DocSmall"]),
         Spacer(1, 0.3 * cm),
@@ -246,7 +267,7 @@ def generate_service_contract_pdf(contract_id: int, save_path: str | Path | None
             ["TESTEMUNHA 2", "Nome: ______________________________  CPF: ____________________"],
         ], styles, [3.0 * cm, 14.2 * cm]),
         Spacer(1, 0.45 * cm),
-        Paragraph("Minuta administrativa gerada pelo SolarOS. Recomenda-se revisão jurídica antes da assinatura, especialmente quanto a tributos, responsabilidade, garantias, foro e regras específicas do serviço contratado.", styles["DocSmall"]),
+        Paragraph(f"Minuta administrativa gerada pelo {_safe(configured_app_name(company))}. Recomenda-se revisão jurídica antes da assinatura, especialmente quanto a tributos, responsabilidade, garantias, foro e regras específicas do serviço contratado.", styles["DocSmall"]),
     ]
     doc.build(
         story,

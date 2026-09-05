@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -146,6 +146,9 @@ def connect() -> sqlite3.Connection | PostgresConnection:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
+    app_name TEXT NOT NULL DEFAULT 'SolarOS By OnGrid',
+    brand_logo BLOB,
+    brand_logo_mime TEXT,
     company_name TEXT NOT NULL,
     legal_name TEXT,
     document TEXT,
@@ -677,11 +680,12 @@ def init_db(seed: bool = True) -> None:
         if count == 0:
             conn.execute(
                 """INSERT INTO settings
-                   (id, company_name, legal_name, document, email, phone, address, report_footer,
+                   (id, app_name, company_name, legal_name, document, email, phone, address, report_footer,
                     technical_name, technical_title, technical_registration,
                     signature_image, signature_image_mime)
-                   VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
+                    "SolarOS By OnGrid",
                     "SolarOS Energia Solar",
                     "SolarOS Energia Solar Ltda.",
                     "00.000.000/0001-00",
@@ -721,6 +725,9 @@ def init_db(seed: bool = True) -> None:
 def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> None:
     if getattr(conn, "is_postgres", False):
         additions = {
+            "app_name": "TEXT NOT NULL DEFAULT 'SolarOS By OnGrid'",
+            "brand_logo": "BYTEA",
+            "brand_logo_mime": "TEXT",
             "technical_name": "TEXT",
             "technical_title": "TEXT",
             "technical_registration": "TEXT",
@@ -733,6 +740,9 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
         return
     columns = {row[1] for row in conn.execute("PRAGMA table_info(settings)").fetchall()}
     additions = {
+        "app_name": "TEXT NOT NULL DEFAULT 'SolarOS By OnGrid'",
+        "brand_logo": "BLOB",
+        "brand_logo_mime": "TEXT",
         "technical_name": "TEXT",
         "technical_title": "TEXT",
         "technical_registration": "TEXT",

@@ -11,6 +11,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from solar_crm.branding import configured_logo
 from solar_crm.calculations import money
 from solar_crm.db import query_one
 from solar_crm.service_documents import _footer, _safe, _styles, _technical_signature, _text_block
@@ -22,20 +23,17 @@ BLUE = HexColor("#3A91C5")
 DARK = HexColor("#18323C")
 PALE_BLUE = HexColor("#EDF7FC")
 BORDER = HexColor("#CFDCE2")
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_LOGO = PROJECT_ROOT / "assets" / "ongrid_logo.png"
-
-
-def _brand_header(proposal: dict, styles) -> Table:
-    if DEFAULT_LOGO.exists():
-        logo = Image(str(DEFAULT_LOGO))
+def _brand_header(company: dict, proposal: dict, styles) -> Table:
+    try:
+        logo_source = configured_logo(company)
+        logo = Image(BytesIO(logo_source) if isinstance(logo_source, bytes) else str(logo_source))
         scale = min(7.2 * cm / logo.imageWidth, 2.1 * cm / logo.imageHeight)
         logo.drawWidth = logo.imageWidth * scale
         logo.drawHeight = logo.imageHeight * scale
         logo.hAlign = "LEFT"
         brand = logo
-    else:
-        brand = Paragraph("<b>OnGrid Energia Solar</b>", styles["DocBrand"])
+    except Exception:
+        brand = Paragraph(f"<b>{_safe(company['company_name'])}</b>", styles["DocBrand"])
     summary = Paragraph(
         f"<b>PROPOSTA COMERCIAL</b><br/><font size='10'>{_safe(proposal['number'])}</font><br/>"
         f"<font color='#65736B' size='8'>Status: {_safe(proposal['status'])}</font>",
@@ -56,8 +54,6 @@ def _brand_header(proposal: dict, styles) -> Table:
 
 def generate_proposal_pdf(proposal_id: int, save_path: str | Path | None = None) -> bytes:
     company = query_one("SELECT * FROM settings WHERE id=1")
-    brand_company = dict(company)
-    brand_company["company_name"] = "OnGrid Energia Solar"
     proposal = query_one(
         """SELECT pr.*, c.name AS client_name, c.document AS client_document,
                   c.contact_name, c.email AS client_email, c.phone AS client_phone,
@@ -93,10 +89,10 @@ def generate_proposal_pdf(proposal_id: int, save_path: str | Path | None = None)
     doc = SimpleDocTemplate(
         buffer, pagesize=A4, rightMargin=1.55 * cm, leftMargin=1.55 * cm,
         topMargin=1.2 * cm, bottomMargin=1.8 * cm,
-        title=f"{proposal['number']} - {proposal['title']}", author="OnGrid Energia Solar",
+        title=f"{proposal['number']} - {proposal['title']}", author=company["company_name"],
     )
 
-    story: list = [_brand_header(proposal, styles), Spacer(1, 0.34 * cm)]
+    story: list = [_brand_header(company, proposal, styles), Spacer(1, 0.34 * cm)]
     story.append(Paragraph(_safe(proposal["title"]), styles["ProposalHero"]))
     story.append(Paragraph(
         f"Solução de {_safe(str(proposal['service_type']).lower())} preparada para <b>{_safe(proposal['client_name'])}</b>.",
@@ -170,8 +166,8 @@ def generate_proposal_pdf(proposal_id: int, save_path: str | Path | None = None)
 
     doc.build(
         story,
-        onFirstPage=lambda canvas, document: _footer(canvas, document, brand_company, proposal["number"]),
-        onLaterPages=lambda canvas, document: _footer(canvas, document, brand_company, proposal["number"]),
+        onFirstPage=lambda canvas, document: _footer(canvas, document, company, proposal["number"]),
+        onLaterPages=lambda canvas, document: _footer(canvas, document, company, proposal["number"]),
     )
     pdf = buffer.getvalue()
     buffer.close()

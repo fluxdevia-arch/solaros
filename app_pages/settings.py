@@ -1,5 +1,6 @@
 import streamlit as st
 
+from solar_crm.branding import configured_app_name, configured_logo, normalize_brand_logo
 from solar_crm.db import clear_business_data, execute, get_db_path, query_one, using_postgres
 from solar_crm.document_cache import clear_document_caches
 from solar_crm.signature import normalize_signature_image
@@ -15,6 +16,23 @@ with left:
     with st.container(border=True):
         st.subheader("Dados da empresa", icon=":material/business:")
         with st.form("company_settings"):
+            st.subheader("Identidade do aplicativo", icon=":material/palette:")
+            app_name = st.text_input(
+                "Nome do sistema",
+                value=configured_app_name(settings),
+                help="Este nome aparece na tela de login e no menu lateral desta instalação.",
+            )
+            brand_logo_upload = st.file_uploader(
+                "Logotipo da empresa",
+                type=["png", "jpg", "jpeg"],
+                max_upload_size=5,
+                help="Prefira PNG com fundo transparente. O arquivo será otimizado para uso no aplicativo e nos PDFs.",
+            )
+            remove_brand_logo = st.checkbox(
+                "Voltar ao logotipo padrão do SolarOS",
+                disabled=not bool(settings.get("brand_logo")),
+            )
+            st.divider()
             company_name = st.text_input("Nome de exibição", value=settings["company_name"] or "")
             legal_name = st.text_input("Razão social", value=settings["legal_name"] or "")
             document = st.text_input("CNPJ/CPF", value=settings["document"] or "")
@@ -40,6 +58,16 @@ with left:
             footer = st.text_area("Rodapé e observação legal dos relatórios", value=settings["report_footer"] or "")
             if st.form_submit_button("Salvar configurações", type="primary", icon=":material/save:"):
                 try:
+                    if not app_name.strip():
+                        raise ValueError("Informe o nome do sistema.")
+                    brand_logo = settings.get("brand_logo")
+                    brand_logo_mime = settings.get("brand_logo_mime")
+                    if remove_brand_logo:
+                        brand_logo = None
+                        brand_logo_mime = None
+                    elif brand_logo_upload is not None:
+                        brand_logo = normalize_brand_logo(brand_logo_upload.getvalue())
+                        brand_logo_mime = "image/png"
                     signature_image = settings["signature_image"]
                     signature_mime = settings["signature_image_mime"]
                     if remove_signature:
@@ -49,20 +77,26 @@ with left:
                         signature_image = normalize_signature_image(signature_upload.getvalue())
                         signature_mime = "image/png"
                     execute(
-                        """UPDATE settings SET company_name=?, legal_name=?, document=?, email=?, phone=?, address=?,
+                        """UPDATE settings SET app_name=?, brand_logo=?, brand_logo_mime=?,
+                           company_name=?, legal_name=?, document=?, email=?, phone=?, address=?,
                            technical_name=?, technical_title=?, technical_registration=?, signature_image=?,
                            signature_image_mime=?, share_base_url=?, report_footer=? WHERE id=1""",
                         (
+                            app_name.strip(), brand_logo, brand_logo_mime,
                             company_name, legal_name, document, email, phone, address, technical_name,
                             technical_title, technical_registration, signature_image, signature_mime,
                             share_base_url, footer,
                         ),
                     )
                     clear_document_caches()
-                    flash("Configurações e assinatura salvas.")
+                    flash("Identidade, dados da empresa e assinatura salvos.")
                     st.rerun()
                 except ValueError as exc:
                     st.error(str(exc), icon=":material/error:")
+
+        st.caption("Identidade visual atual")
+        st.image(configured_logo(settings), width=360)
+        st.caption(f"Nome do sistema: {configured_app_name(settings)}")
 
         if settings["signature_image"]:
             st.caption("Assinatura manuscrita atual")
@@ -109,6 +143,7 @@ with right:
         - Agenda, recorrências e chamados
         - Relatórios mensais em PDF
         - Caixa e faturamento de manutenção
+        - Identidade white-label por empresa (nome e logotipo)
         - Login individual por e-mail e senha
         - PostgreSQL em nuvem com migração do banco local
         """)

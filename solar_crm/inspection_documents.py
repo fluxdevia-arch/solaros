@@ -8,14 +8,13 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from solar_crm.branding import configured_logo
 from solar_crm.db import query_one
 from solar_crm.inspections import inspection_details, inspection_items, inspection_photos
 from solar_crm.service_documents import BORDER, DARK, GREEN, MUTED, PALE, _footer, _header, _info_table, _safe, _styles, _technical_signature, _text_block
 from solar_crm.ui import date_br
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_LOGO = PROJECT_ROOT / "assets" / "ongrid_logo.png"
 STATUS_COLORS = {
     "Conforme": colors.HexColor("#DDF3E8"),
     "Atenção": colors.HexColor("#FFF0C7"),
@@ -27,13 +26,16 @@ STATUS_COLORS = {
 
 def _inspection_header(company: dict, inspection: dict, styles) -> list:
     brand: object = Paragraph(_safe(company["company_name"]), styles["DocBrand"])
-    if DEFAULT_LOGO.exists():
-        logo = Image(str(DEFAULT_LOGO))
+    try:
+        logo_source = configured_logo(company)
+        logo = Image(BytesIO(logo_source) if isinstance(logo_source, bytes) else str(logo_source))
         scale = min(6.3 * cm / logo.imageWidth, 1.65 * cm / logo.imageHeight)
         logo.drawWidth = logo.imageWidth * scale
         logo.drawHeight = logo.imageHeight * scale
         logo.hAlign = "LEFT"
         brand = logo
+    except Exception:
+        pass
     header = Table(
         [[brand, Paragraph(
             f"<b>RELATÓRIO DE VISTORIA</b><br/><font size='8' color='#65736B'>{_safe(inspection['number'])}</font>",

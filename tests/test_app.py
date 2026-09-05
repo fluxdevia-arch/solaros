@@ -57,6 +57,17 @@ class StreamlitSmokeTest(unittest.TestCase):
             app.switch_page(page_path).run()
             self.assertFalse(app.exception, f"Falha ao renderizar {page_path}")
 
+    def test_entrypoint_uses_configured_white_label_name(self):
+        from solar_crm.db import execute, init_db
+
+        init_db(seed=True)
+        execute("UPDATE settings SET app_name='Portal Solar Parceiro' WHERE id=1")
+        app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        app = AppTest.from_file(app_path, default_timeout=20).run()
+
+        self.assertFalse(app.exception)
+        self.assertTrue(any("Portal Solar Parceiro" in item.value for item in app.markdown))
+
     def test_all_pages_render_with_an_empty_database(self):
         previous_seed = os.environ.get("SOLAROS_SEED_DEMO")
         os.environ["SOLAROS_SEED_DEMO"] = "false"

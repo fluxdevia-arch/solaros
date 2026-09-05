@@ -1,12 +1,12 @@
 import streamlit as st
 
 from solar_crm.auth import render_user_sidebar, require_login
-from solar_crm.branding import APP_LOGO, APP_NAME
+from solar_crm.branding import configured_app_name, configured_logo
 from solar_crm.config import seed_demo_data
-from solar_crm.db import SCHEMA_VERSION, database_cache_key, init_db, using_postgres
+from solar_crm.db import SCHEMA_VERSION, database_cache_key, init_db, query_one, using_postgres
 
 st.set_page_config(
-    page_title=f"{APP_NAME} · Gestão solar",
+    page_title="Gestão solar",
     page_icon=":material/solar_power:",
     layout="wide",
     initial_sidebar_state="auto",
@@ -15,10 +15,6 @@ st.set_page_config(
 field_order_mode = bool(str(st.query_params.get("os") or "").strip())
 field_inspection_mode = bool(str(st.query_params.get("inspection") or "").strip())
 field_mode = field_order_mode or field_inspection_mode
-authenticated = False if field_mode else require_login()
-
-if field_mode:
-    st.logo(str(APP_LOGO), size="large")
 
 
 @st.cache_resource(show_spinner=False)
@@ -29,6 +25,14 @@ def prepare_database(schema_version: int, seed: bool, database_identity: str) ->
 
 
 prepare_database(SCHEMA_VERSION, seed_demo_data(), database_cache_key())
+
+app_settings = query_one("SELECT app_name, brand_logo FROM settings WHERE id=1")
+active_app_name = configured_app_name(app_settings)
+active_logo = configured_logo(app_settings)
+authenticated = False if field_mode else require_login(active_app_name, active_logo)
+
+if field_mode:
+    st.logo(active_logo, size="large")
 
 st.session_state.setdefault("selected_client_id", None)
 st.session_state.setdefault("selected_plant_id", None)
@@ -79,8 +83,8 @@ pages = {
 }
 
 with st.sidebar:
-    st.image(str(APP_LOGO), width="stretch")
-    st.markdown(f"### {APP_NAME}")
+    st.image(active_logo, width="stretch")
+    st.markdown(f"### {active_app_name}")
     st.caption("Operação, pós-venda e engenharia solar · v2.1")
     st.caption("Banco em nuvem" if using_postgres() else "Banco local")
     st.divider()

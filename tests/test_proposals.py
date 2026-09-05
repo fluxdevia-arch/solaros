@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pypdf import PdfReader
 
-from solar_crm.db import init_db
+from solar_crm.db import execute, init_db
 from solar_crm.proposal_documents import generate_proposal_pdf
 from solar_crm.records import create_proposal
 
@@ -36,6 +36,9 @@ class ProposalTests(unittest.TestCase):
             pass
 
     def test_create_and_render_branded_proposal(self):
+        execute(
+            "UPDATE settings SET app_name='Gestão Solar Parceira', company_name='Empresa Solar Parceira' WHERE id=1"
+        )
         proposal_id = create_proposal({
             "client_id": 1,
             "title": "Proposta de consultoria técnica",
@@ -53,7 +56,8 @@ class ProposalTests(unittest.TestCase):
         reader = PdfReader(BytesIO(pdf))
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
         self.assertIn("PROPOSTA COMERCIAL", text)
-        self.assertIn("OnGrid", text)
+        self.assertIn("Empresa Solar Parceira", text)
+        self.assertNotIn("OnGrid Energia Solar", text)
         self.assertIn("Carlos Jessé Soares", text)
         self.assertGreater(len(pdf), 10_000)
 

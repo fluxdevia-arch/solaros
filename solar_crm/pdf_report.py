@@ -22,6 +22,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from solar_crm.branding import configured_logo
 from solar_crm.calculations import calculate_coverage, calculate_savings, money, number_br, percent
 from solar_crm.db import query, query_one
 from solar_crm.ui import date_br, month_label
@@ -55,6 +56,32 @@ def _styles():
 
 def _safe(text: object) -> str:
     return str(text or "-").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _report_header(company: dict, styles) -> Table:
+    brand: object = Paragraph(_safe(company["company_name"]), styles["Brand"])
+    try:
+        logo_source = configured_logo(company)
+        logo = ReportImage(BytesIO(logo_source) if isinstance(logo_source, bytes) else str(logo_source))
+        scale = min(6.7 * cm / logo.imageWidth, 1.7 * cm / logo.imageHeight)
+        logo.drawWidth = logo.imageWidth * scale
+        logo.drawHeight = logo.imageHeight * scale
+        brand = logo
+    except Exception:
+        pass
+    table = Table(
+        [[brand, Paragraph("GESTÃO E PERFORMANCE DE ENERGIA SOLAR", styles["Muted"])]],
+        colWidths=[10.7 * cm, 7.0 * cm],
+    )
+    table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    return table
 
 
 def _page(canvas, doc, company: dict, reference_month: str):
@@ -191,8 +218,7 @@ def generate_client_report(client_id: int, reference_month: str, save_path: str 
     )
     styles = _styles()
     story = [
-        Paragraph(_safe(company["company_name"]), styles["Brand"]),
-        Paragraph("GESTÃO E PERFORMANCE DE ENERGIA SOLAR", styles["Muted"]),
+        _report_header(company, styles),
         Paragraph("Demonstrativo mensal de energia", styles["ReportTitle"]),
         Paragraph(f"{_safe(client['name'])} · {month_label(reference_month)}", styles["BodySmall"]),
         Spacer(1, 0.4 * cm),
