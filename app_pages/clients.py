@@ -25,6 +25,7 @@ with add_client:
         contact = st.text_input("Contato principal")
         email = st.text_input("E-mail")
         phone = st.text_input("Telefone")
+        address = st.text_input("Endereço")
         city = st.text_input("Cidade")
         state = st.text_input("UF", max_chars=2)
         notes = st.text_area("Observações")
@@ -34,9 +35,12 @@ with add_client:
                 st.error("Informe o nome do cliente.")
             else:
                 new_id = execute(
-                    """INSERT INTO clients (name, document, client_type, contact_name, email, phone, city, state, status, notes)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Ativo', ?)""",
-                    (name.strip(), document, client_type, contact, email, phone, city, state.upper(), notes),
+                    """INSERT INTO clients (name, document, client_type, contact_name, email, phone, address, city, state, status, notes)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Ativo', ?)""",
+                    (
+                        name.strip(), document.strip(), client_type, contact.strip(), email.strip(),
+                        phone.strip(), address.strip(), city.strip(), state.strip().upper(), notes.strip(),
+                    ),
                 )
                 st.session_state.selected_client_id = new_id
                 flash("Cliente cadastrado com sucesso.")
@@ -52,6 +56,59 @@ selected_name = st.selectbox("Cliente", list(option_map), index=list(option_map)
 client_id = option_map[selected_name]
 st.session_state.selected_client_id = client_id
 client = query_one("SELECT * FROM clients WHERE id=?", (client_id,))
+
+with st.container(horizontal=True, horizontal_alignment="right"):
+    edit_client = st.popover("Editar cliente", icon=":material/edit:")
+
+with edit_client:
+    st.caption("Altere os dados cadastrais e salve para atualizar relatórios, contratos e ordens de serviço.")
+    with st.form("edit_client"):
+        name_edit = st.text_input("Nome ou razão social", value=client["name"] or "", key="client_edit_name")
+        type_options = ["Pessoa jurídica", "Pessoa física"]
+        current_type = client["client_type"] if client["client_type"] in type_options else type_options[0]
+        client_type_edit = st.segmented_control(
+            "Tipo",
+            type_options,
+            default=current_type,
+            key="client_edit_type",
+        )
+        document_edit = st.text_input("CPF ou CNPJ", value=client["document"] or "", key="client_edit_document")
+        contact_edit = st.text_input("Contato principal", value=client["contact_name"] or "", key="client_edit_contact")
+        email_edit = st.text_input("E-mail", value=client["email"] or "", key="client_edit_email")
+        phone_edit = st.text_input("Telefone", value=client["phone"] or "", key="client_edit_phone")
+        address_edit = st.text_input("Endereço", value=client["address"] or "", key="client_edit_address")
+        city_edit = st.text_input("Cidade", value=client["city"] or "", key="client_edit_city")
+        state_edit = st.text_input("UF", value=client["state"] or "", max_chars=2, key="client_edit_state")
+        status_options = ["Ativo", "Inativo"]
+        status_edit = st.selectbox(
+            "Status",
+            status_options,
+            index=status_options.index(client["status"]) if client["status"] in status_options else 0,
+            key="client_edit_status",
+        )
+        notes_edit = st.text_area("Observações", value=client["notes"] or "", key="client_edit_notes")
+        if st.form_submit_button(
+            "Salvar alterações",
+            type="primary",
+            icon=":material/save:",
+            key="client_edit_submit",
+        ):
+            if not name_edit.strip():
+                st.error("Informe o nome do cliente.")
+            else:
+                execute(
+                    """UPDATE clients
+                       SET name=?, document=?, client_type=?, contact_name=?, email=?, phone=?,
+                           address=?, city=?, state=?, status=?, notes=?
+                       WHERE id=?""",
+                    (
+                        name_edit.strip(), document_edit.strip(), client_type_edit, contact_edit.strip(),
+                        email_edit.strip(), phone_edit.strip(), address_edit.strip(), city_edit.strip(),
+                        state_edit.strip().upper(), status_edit, notes_edit.strip(), client_id,
+                    ),
+                )
+                flash("Cadastro do cliente atualizado.")
+                st.rerun()
 
 plants = query(
     "SELECT * FROM plants WHERE client_id=? ORDER BY name",
@@ -89,6 +146,7 @@ with profile_tab:
                 ":material/person: Contato": client["contact_name"] or "-",
                 ":material/mail: E-mail": client["email"] or "-",
                 ":material/call: Telefone": client["phone"] or "-",
+                ":material/home: Endereço": client["address"] or "-",
                 ":material/location_on: Localidade": f"{client['city'] or '-'} / {client['state'] or '-'}",
                 ":material/calendar_today: Cliente desde": date_br(client["created_at"]),
             }, border="horizontal", width="stretch")
@@ -96,17 +154,6 @@ with profile_tab:
         with st.container(border=True):
             st.subheader("Observações", icon=":material/sticky_note_2:")
             st.write(client["notes"] or "Nenhuma observação cadastrada.")
-            with st.expander("Atualizar cadastro", icon=":material/edit:"):
-                with st.form("edit_client"):
-                    email_edit = st.text_input("E-mail", value=client["email"] or "")
-                    phone_edit = st.text_input("Telefone", value=client["phone"] or "")
-                    contact_edit = st.text_input("Contato", value=client["contact_name"] or "")
-                    status_edit = st.selectbox("Status", ["Ativo", "Inativo"], index=0 if client["status"] == "Ativo" else 1)
-                    notes_edit = st.text_area("Observações", value=client["notes"] or "")
-                    if st.form_submit_button("Salvar alterações", type="primary", icon=":material/save:"):
-                        execute("UPDATE clients SET email=?, phone=?, contact_name=?, status=?, notes=? WHERE id=?", (email_edit, phone_edit, contact_edit, status_edit, notes_edit, client_id))
-                        flash("Cadastro atualizado.")
-                        st.rerun()
 
     st.subheader("Usinas vinculadas", icon=":material/solar_power:")
     if plants:

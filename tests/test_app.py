@@ -74,6 +74,38 @@ class StreamlitSmokeTest(unittest.TestCase):
             else:
                 os.environ["SOLAROS_SEED_DEMO"] = previous_seed
 
+    def test_client_full_profile_can_be_edited(self):
+        from solar_crm.db import query_one
+
+        app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        app = AppTest.from_file(app_path, default_timeout=20).run()
+        app.switch_page("app_pages/clients.py").run()
+        self.assertFalse(app.exception)
+
+        client_id = app.session_state["selected_client_id"]
+        app.text_input(key="client_edit_name").set_value("Cliente atualizado")
+        app.text_input(key="client_edit_document").set_value("11.222.333/0001-44")
+        app.text_input(key="client_edit_contact").set_value("Contato atualizado")
+        app.text_input(key="client_edit_email").set_value("contato@atualizado.com.br")
+        app.text_input(key="client_edit_phone").set_value("(83) 98888-7777")
+        app.text_input(key="client_edit_address").set_value("Rua Nova, 123")
+        app.text_input(key="client_edit_city").set_value("João Pessoa")
+        app.text_input(key="client_edit_state").set_value("pb")
+        app.text_area(key="client_edit_notes").set_value("Cadastro conferido em campo.")
+        app.button(key="client_edit_submit").click().run()
+
+        self.assertFalse(app.exception)
+        updated = query_one("SELECT * FROM clients WHERE id=?", (client_id,))
+        self.assertEqual(updated["name"], "Cliente atualizado")
+        self.assertEqual(updated["document"], "11.222.333/0001-44")
+        self.assertEqual(updated["contact_name"], "Contato atualizado")
+        self.assertEqual(updated["email"], "contato@atualizado.com.br")
+        self.assertEqual(updated["phone"], "(83) 98888-7777")
+        self.assertEqual(updated["address"], "Rua Nova, 123")
+        self.assertEqual(updated["city"], "João Pessoa")
+        self.assertEqual(updated["state"], "PB")
+        self.assertEqual(updated["notes"], "Cadastro conferido em campo.")
+
     def test_public_service_order_route_renders_without_login(self):
         from solar_crm.db import init_db, query_one
         from solar_crm.workflow import create_service_order
