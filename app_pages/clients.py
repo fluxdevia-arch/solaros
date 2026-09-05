@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -114,9 +114,17 @@ plants = query(
     "SELECT * FROM plants WHERE client_id=? ORDER BY name",
     (client_id,),
 )
-contract = query_one("SELECT * FROM contracts WHERE client_id=? ORDER BY id DESC LIMIT 1", (client_id,))
+contracts = query("SELECT * FROM contracts WHERE client_id=? ORDER BY id DESC", (client_id,))
+recurring_contract = next(
+    (
+        row for row in contracts
+        if row["status"] == "Ativo" and row["billing_cycle"] != "Parcela única"
+    ),
+    None,
+)
+one_time_contracts = [row for row in contracts if row["billing_cycle"] == "Parcela única"]
 capacity = sum(float(plant["installed_kwp"] or 0) for plant in plants)
-monthly = contract_monthly_value(contract, len(plants), capacity) if contract else 0
+monthly = contract_monthly_value(recurring_contract, len(plants), capacity) if recurring_contract else 0
 total_savings = query_one(
     """SELECT COALESCE(SUM(r.reference_amount-r.billed_amount),0) AS value
        FROM readings r JOIN plants p ON p.id=r.plant_id WHERE p.client_id=?""",
@@ -164,77 +172,265 @@ with profile_tab:
         st.caption("Nenhuma usina vinculada.")
 
 with contract_tab:
-    if contract:
-        st.markdown(status_badge(contract["status"]))
+    st.subheader("Pós-venda recorrente", icon=":material/autorenew:")
+    if recurring_contract:
+        st.markdown(status_badge(recurring_contract["status"]))
         with st.container(horizontal=True):
-            st.metric("Plano", contract["plan"], border=True)
-            st.metric("Valor calculado", money(monthly), border=True)
-            st.metric("Dia de cobrança", contract["billing_day"], border=True)
-            st.metric("Próximo reajuste", date_br(contract["next_reajust_date"]), border=True)
+            st.metric("Plano", recurring_contract["plan"], border=True)
+            st.metric("Mensalidade", money(monthly), border=True)
+            st.metric("Dia de cobrança", recurring_contract["billing_day"], border=True)
+            st.metric("Próximo reajuste", date_br(recurring_contract["next_reajust_date"]), border=True)
         st.table({
-            "Início": date_br(contract["start_date"]),
-            "Ciclo": contract["billing_cycle"],
-            "Base mensal": money(contract["base_fee"]),
-            "Por usina": money(contract["per_plant_fee"]),
-            "Por kWp": money(contract["per_kwp_fee"]),
-            "Serviços adicionais": money(contract["extras_fee"]),
-            "Desconto": f"{contract['discount_pct']:.1f}%",
-            "Índice de reajuste": contract["reajust_index"],
+            "Início": date_br(recurring_contract["start_date"]),
+            "Ciclo": recurring_contract["billing_cycle"],
+            "Base mensal": money(recurring_contract["base_fee"]),
+            "Por usina": money(recurring_contract["per_plant_fee"]),
+            "Por kWp": money(recurring_contract["per_kwp_fee"]),
+            "Serviços adicionais": money(recurring_contract["extras_fee"]),
+            "Desconto": f"{recurring_contract['discount_pct']:.1f}%",
+            "Índice de reajuste": recurring_contract["reajust_index"],
         }, border="horizontal", width="content")
         st.subheader("Escopo contratado", icon=":material/checklist:")
-        st.write(contract["scope"] or "Escopo não informado.")
+        st.write(recurring_contract["scope"] or "Escopo não informado.")
     else:
-        st.warning("Este cliente ainda não possui contrato de pós-venda.", icon=":material/warning:")
+        st.info("Este cliente não possui contrato recorrente ativo.", icon=":material/info:")
 
-    with st.expander("Cadastrar novo contrato", icon=":material/add_notes:"):
+    if one_time_contracts:
+        st.subheader("Consultorias e serviços avulsos", icon=":material/engineering:")
+        one_time_frame = query_df(
+            """SELECT c.plan AS service, c.start_date AS start_date, c.base_fee AS amount,
+                      c.status AS contract_status, i.due_date AS due_date,
+                      COALESCE(i.status, 'Sem cobrança') AS billing_status,
+                      COALESCE(i.notes, c.scope, '') AS description
+               FROM contracts c
+               LEFT JOIN invoices i ON i.contract_id=c.id
+               WHERE c.client_id=? AND c.billing_cycle='Parcela única'
+               ORDER BY c.id DESC, i.reference_month DESC""",
+            (client_id,),
+        ).rename(columns={
+            "service": "Serviço", "start_date": "Contratação", "amount": "Valor",
+            "contract_status": "Contrato", "due_date": "Vencimento",
+            "billing_status": "Cobrança", "description": "Descrição",
+        })
+        one_time_frame["Contratação"] = one_time_frame["Contratação"].map(date_br)
+        one_time_frame["Vencimento"] = one_time_frame["Vencimento"].map(date_br)
+        st.dataframe(
+            one_time_frame,
+            hide_index=True,
+            column_config={
+                "Serviço": st.column_config.TextColumn(pinned=True),
+                "Valor": st.column_config.NumberColumn(format="R$ %.2f"),
+            },
+        )
+
+    with st.expander("Cadastrar contrato ou consultoria", icon=":material/add_notes:"):
+        contract_model = st.segmented_control(
+            "Modelo de contratação",
+            ["Pós-venda recorrente", "Consultoria avulsa"],
+            default="Pós-venda recorrente",
+            key="new_contract_model",
+        )
         with st.form("new_contract"):
-            plan = st.selectbox("Plano", ["Essencial", "Performance", "Premium", "Personalizado"])
-            start_date = st.date_input("Início", value=date.today())
-            billing_day = st.number_input("Dia de cobrança", min_value=1, max_value=28, value=10)
-            c1, c2 = st.columns(2)
-            base_fee = c1.number_input("Base mensal (R$)", min_value=0.0, value=300.0, step=10.0)
-            per_plant = c2.number_input("Por usina (R$)", min_value=0.0, value=100.0, step=10.0)
-            per_kwp = c1.number_input("Por kWp (R$)", min_value=0.0, value=1.5, step=0.1)
-            extras = c2.number_input("Adicionais (R$)", min_value=0.0, value=0.0, step=10.0)
-            discount = st.number_input("Desconto (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
-            scope = st.text_area("Escopo", value="Monitoramento, relatório mensal, gestão de faturas e suporte remoto.")
-            if st.form_submit_button("Criar contrato", type="primary", icon=":material/save:"):
-                execute("UPDATE contracts SET status='Encerrado' WHERE client_id=? AND status='Ativo'", (client_id,))
-                execute(
-                    """INSERT INTO contracts (client_id, plan, start_date, billing_day, base_fee, per_plant_fee, per_kwp_fee, extras_fee, discount_pct, billing_cycle, status, scope, reajust_index, next_reajust_date)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Mensal', 'Ativo', ?, 'IPCA', date(?, '+1 year'))""",
-                    (client_id, plan, start_date.isoformat(), billing_day, base_fee, per_plant, per_kwp, extras, discount, scope, start_date.isoformat()),
+            if contract_model == "Pós-venda recorrente":
+                plan = st.selectbox(
+                    "Plano",
+                    ["Essencial", "Performance", "Premium", "Personalizado"],
+                    key="recurring_plan",
                 )
-                flash("Novo contrato criado e contrato anterior encerrado.")
-                st.rerun()
+                start_date = st.date_input("Início", value=date.today(), key="recurring_start_date")
+                billing_day = st.number_input(
+                    "Dia de cobrança", min_value=1, max_value=28, value=10, key="recurring_billing_day"
+                )
+                c1, c2 = st.columns(2)
+                base_fee = c1.number_input(
+                    "Base mensal (R$)", min_value=0.0, value=300.0, step=10.0, key="recurring_base_fee"
+                )
+                per_plant = c2.number_input(
+                    "Por usina (R$)", min_value=0.0, value=100.0, step=10.0, key="recurring_per_plant"
+                )
+                per_kwp = c1.number_input(
+                    "Por kWp (R$)", min_value=0.0, value=1.5, step=0.1, key="recurring_per_kwp"
+                )
+                extras = c2.number_input(
+                    "Adicionais (R$)", min_value=0.0, value=0.0, step=10.0, key="recurring_extras"
+                )
+                discount = st.number_input(
+                    "Desconto (%)", min_value=0.0, max_value=100.0, value=0.0,
+                    step=0.5, key="recurring_discount",
+                )
+                scope = st.text_area(
+                    "Escopo",
+                    value="Monitoramento, relatório mensal, gestão de faturas e suporte remoto.",
+                    key="recurring_scope",
+                )
+            else:
+                consulting_title = st.text_input(
+                    "Nome da consultoria ou serviço",
+                    value="Consultoria para análise de usina fotovoltaica",
+                    key="consulting_title",
+                )
+                c1, c2 = st.columns(2)
+                consulting_start = c1.date_input(
+                    "Data da contratação", value=date.today(), key="consulting_start_date"
+                )
+                consulting_due = c2.date_input(
+                    "Vencimento da cobrança", value=date.today() + timedelta(days=15), key="consulting_due_date"
+                )
+                consulting_amount = st.number_input(
+                    "Valor único (R$)", min_value=0.0, value=3000.0, step=100.0, key="consulting_amount"
+                )
+                consulting_scope = st.text_area(
+                    "Serviço que será realizado",
+                    value=(
+                        "Análise técnica da usina fotovoltaica, conferência de geração e desempenho, "
+                        "avaliação dos equipamentos e entrega de relatório com recomendações."
+                    ),
+                    key="consulting_scope",
+                )
+                consulting_charge_notes = st.text_area(
+                    "Observação da cobrança",
+                    value="Parcela única referente à consultoria técnica contratada.",
+                    key="consulting_charge_notes",
+                )
+
+            submitted_contract = st.form_submit_button(
+                "Salvar contrato e cobrança" if contract_model == "Consultoria avulsa" else "Criar contrato",
+                type="primary",
+                icon=":material/save:",
+                key="create_contract_submit",
+            )
+            if submitted_contract:
+                if contract_model == "Pós-venda recorrente":
+                    execute(
+                        """UPDATE contracts SET status='Encerrado'
+                           WHERE client_id=? AND status='Ativo' AND billing_cycle!='Parcela única'""",
+                        (client_id,),
+                    )
+                    execute(
+                        """INSERT INTO contracts (client_id, plan, start_date, billing_day, base_fee, per_plant_fee, per_kwp_fee, extras_fee, discount_pct, billing_cycle, status, scope, reajust_index, next_reajust_date)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Mensal', 'Ativo', ?, 'IPCA', date(?, '+1 year'))""",
+                        (
+                            client_id, plan, start_date.isoformat(), billing_day, base_fee, per_plant,
+                            per_kwp, extras, discount, scope.strip(), start_date.isoformat(),
+                        ),
+                    )
+                    flash("Novo contrato recorrente criado e contrato recorrente anterior encerrado.")
+                    st.rerun()
+                elif not consulting_title.strip() or not consulting_scope.strip():
+                    st.error("Informe o nome e a descrição do serviço.")
+                elif consulting_amount <= 0:
+                    st.error("Informe um valor maior que zero para a consultoria.")
+                else:
+                    consulting_contract_id = execute(
+                        """INSERT INTO contracts
+                           (client_id, plan, start_date, billing_day, base_fee, per_plant_fee,
+                            per_kwp_fee, extras_fee, discount_pct, billing_cycle, status, scope,
+                            reajust_index, next_reajust_date)
+                           VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 'Parcela única', 'Ativo', ?,
+                                   'Não aplicável', NULL)""",
+                        (
+                            client_id, consulting_title.strip(), consulting_start.isoformat(),
+                            min(consulting_due.day, 28), consulting_amount, consulting_scope.strip(),
+                        ),
+                    )
+                    execute(
+                        """INSERT INTO invoices
+                           (contract_id, reference_month, due_date, amount, status, notes)
+                           VALUES (?, ?, ?, ?, 'Pendente', ?)""",
+                        (
+                            consulting_contract_id, consulting_start.replace(day=1).isoformat(),
+                            consulting_due.isoformat(), consulting_amount,
+                            consulting_charge_notes.strip() or consulting_scope.strip(),
+                        ),
+                    )
+                    flash("Consultoria cadastrada e cobrança única lançada com sucesso.")
+                    st.rerun()
 
 with billing_tab:
     invoices = query_df(
-        """SELECT i.reference_month AS Referência, i.due_date AS Vencimento, i.amount AS Valor,
-                  i.status AS Status, i.paid_at AS Pagamento, i.notes AS Observações
+        """SELECT c.plan AS contract_name, i.reference_month AS reference_month,
+                  i.due_date AS due_date, i.amount AS amount, i.status AS invoice_status,
+                  i.paid_at AS paid_at, i.notes AS notes
            FROM invoices i JOIN contracts c ON c.id=i.contract_id
            WHERE c.client_id=? ORDER BY i.reference_month DESC""",
         (client_id,),
-    )
+    ).rename(columns={
+        "contract_name": "Contrato/serviço", "reference_month": "Referência",
+        "due_date": "Vencimento", "amount": "Valor", "invoice_status": "Status",
+        "paid_at": "Pagamento", "notes": "Observações",
+    })
     if not invoices.empty:
         invoices["Referência"] = invoices["Referência"].str[:7]
         invoices["Vencimento"] = invoices["Vencimento"].map(date_br)
         invoices["Pagamento"] = invoices["Pagamento"].map(date_br)
-        st.dataframe(invoices, hide_index=True, column_config={"Valor": st.column_config.NumberColumn(format="R$ %.2f"), "Status": st.column_config.TextColumn(width="small")})
+        st.dataframe(
+            invoices,
+            hide_index=True,
+            column_config={
+                "Contrato/serviço": st.column_config.TextColumn(pinned=True),
+                "Valor": st.column_config.NumberColumn(format="R$ %.2f"),
+                "Status": st.column_config.TextColumn(width="small"),
+            },
+        )
     else:
         st.caption("Nenhuma cobrança registrada.")
 
-    if contract:
+    billable_contracts = [row for row in contracts if row["status"] == "Ativo"]
+    if billable_contracts:
         with st.expander("Lançar cobrança", icon=":material/add_card:"):
+            billing_contract_map = {
+                f"#{row['id']} · {row['plan']} · {row['billing_cycle']}": row
+                for row in billable_contracts
+            }
+            billing_contract_label = st.selectbox(
+                "Contrato ou serviço",
+                list(billing_contract_map),
+                key="invoice_contract",
+            )
+            billing_contract = billing_contract_map[billing_contract_label]
+            default_amount = (
+                float(billing_contract["base_fee"] or 0)
+                if billing_contract["billing_cycle"] == "Parcela única"
+                else contract_monthly_value(billing_contract, len(plants), capacity)
+            )
             with st.form("new_invoice"):
-                ref = st.date_input("Mês de referência", value=date.today().replace(day=1))
-                due = st.date_input("Vencimento", value=date.today().replace(day=min(contract["billing_day"], 28)))
-                amount = st.number_input("Valor (R$)", min_value=0.0, value=float(monthly), step=10.0)
-                status = st.selectbox("Status", ["Pendente", "Pago", "Atrasado", "Cancelado"])
-                if st.form_submit_button("Registrar cobrança", type="primary", icon=":material/save:"):
-                    try:
-                        execute("INSERT INTO invoices (contract_id, reference_month, due_date, amount, status, notes) VALUES (?, ?, ?, ?, ?, ?)", (contract["id"], ref.replace(day=1).isoformat(), due.isoformat(), amount, status, "Mensalidade de pós-venda"))
+                ref = st.date_input("Mês de referência", value=date.today().replace(day=1), key="invoice_reference")
+                due = st.date_input(
+                    "Vencimento",
+                    value=date.today().replace(day=min(billing_contract["billing_day"], 28)),
+                    key="invoice_due_date",
+                )
+                amount = st.number_input(
+                    "Valor (R$)", min_value=0.0, value=default_amount, step=10.0, key="invoice_amount"
+                )
+                status = st.selectbox(
+                    "Status", ["Pendente", "Pago", "Atrasado", "Cancelado"], key="invoice_status"
+                )
+                notes = st.text_area(
+                    "Descrição ou observação da cobrança",
+                    value=billing_contract["scope"] or "Serviço contratado.",
+                    key="invoice_notes",
+                )
+                if st.form_submit_button(
+                    "Registrar cobrança", type="primary", icon=":material/save:", key="invoice_submit"
+                ):
+                    reference_month = ref.replace(day=1).isoformat()
+                    duplicate = query_one(
+                        "SELECT id FROM invoices WHERE contract_id=? AND reference_month=?",
+                        (billing_contract["id"], reference_month),
+                    )
+                    if duplicate:
+                        st.error("Já existe uma cobrança para este contrato no mês informado.")
+                    else:
+                        paid_at = date.today().isoformat() if status == "Pago" else None
+                        execute(
+                            """INSERT INTO invoices
+                               (contract_id, reference_month, due_date, amount, status, paid_at, notes)
+                               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                billing_contract["id"], reference_month, due.isoformat(), amount,
+                                status, paid_at, notes.strip(),
+                            ),
+                        )
                         flash("Cobrança registrada.")
                         st.rerun()
-                    except Exception as exc:
-                        st.error(f"Não foi possível registrar: {exc}")

@@ -106,6 +106,56 @@ class StreamlitSmokeTest(unittest.TestCase):
         self.assertEqual(updated["state"], "PB")
         self.assertEqual(updated["notes"], "Cadastro conferido em campo.")
 
+    def test_one_time_consulting_contract_creates_detailed_charge(self):
+        from solar_crm.db import query_one
+
+        app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        app = AppTest.from_file(app_path, default_timeout=20).run()
+        app.switch_page("app_pages/clients.py").run()
+        self.assertFalse(app.exception)
+
+        client_id = app.session_state["selected_client_id"]
+        previous_recurring = query_one(
+            """SELECT id FROM contracts
+               WHERE client_id=? AND status='Ativo' AND billing_cycle='Mensal'
+               ORDER BY id DESC LIMIT 1""",
+            (client_id,),
+        )
+
+        app.segmented_control(key="new_contract_model").set_value("Consultoria avulsa").run()
+        self.assertFalse(app.exception)
+        app.text_input(key="consulting_title").set_value("Consultoria para análise da usina")
+        app.number_input(key="consulting_amount").set_value(3000.0)
+        app.text_area(key="consulting_scope").set_value(
+            "Analisar geração, inversores, strings e apresentar relatório técnico."
+        )
+        app.text_area(key="consulting_charge_notes").set_value(
+            "Parcela única da análise técnica da usina principal."
+        )
+        app.button(key="create_contract_submit").click().run()
+
+        self.assertFalse(app.exception)
+        consulting = query_one(
+            """SELECT * FROM contracts
+               WHERE client_id=? AND billing_cycle='Parcela única'
+               ORDER BY id DESC LIMIT 1""",
+            (client_id,),
+        )
+        self.assertIsNotNone(consulting)
+        self.assertEqual(consulting["plan"], "Consultoria para análise da usina")
+        self.assertEqual(float(consulting["base_fee"]), 3000.0)
+        self.assertIn("inversores", consulting["scope"])
+
+        charge = query_one("SELECT * FROM invoices WHERE contract_id=?", (consulting["id"],))
+        self.assertIsNotNone(charge)
+        self.assertEqual(float(charge["amount"]), 3000.0)
+        self.assertEqual(charge["status"], "Pendente")
+        self.assertEqual(charge["notes"], "Parcela única da análise técnica da usina principal.")
+
+        if previous_recurring:
+            recurring = query_one("SELECT status FROM contracts WHERE id=?", (previous_recurring["id"],))
+            self.assertEqual(recurring["status"], "Ativo")
+
     def test_public_service_order_route_renders_without_login(self):
         from solar_crm.db import init_db, query_one
         from solar_crm.workflow import create_service_order
