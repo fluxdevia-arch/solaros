@@ -24,6 +24,7 @@ from solar_crm.inspections import (
     inspection_share_url,
     update_inspection,
 )
+from solar_crm.sharing import resolve_share_base_url
 from solar_crm.ui import date_br, flash, page_intro, render_delete_control, show_flash
 
 
@@ -342,7 +343,11 @@ if inspections:
                 break
     selected_label = st.selectbox("Abrir vistoria", list(inspection_map), index=selected_default)
     selected = inspection_details(inspection_map[selected_label]["id"])
-    share_url = inspection_share_url(selected, settings.get("share_base_url") if settings else "")
+    share_base_url = resolve_share_base_url(
+        settings.get("share_base_url") if settings else "",
+        str(st.context.url),
+    )
+    share_url = inspection_share_url(selected, share_base_url)
     with st.container(border=True):
         st.subheader(f"{selected['number']} · ficha de campo", icon=":material/share:")
         st.text_input("Link individual para o técnico", value=share_url, key=f"inspection_share_{selected['id']}")

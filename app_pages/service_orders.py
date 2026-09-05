@@ -6,6 +6,7 @@ import streamlit as st
 
 from solar_crm.db import query, query_df, query_one
 from solar_crm.document_cache import service_order_pdf
+from solar_crm.sharing import resolve_share_base_url
 from solar_crm.ui import date_br, flash, page_intro, render_delete_control, show_flash
 from solar_crm.workflow import (
     SERVICE_ORDER_STATUSES,
@@ -150,7 +151,11 @@ if orders:
     order_map = {f"{row['number']} · {row['client_name']} · {row['title']}": row for row in orders}
     selected_order_label = st.selectbox("Abrir ordem de serviço", list(order_map), key="os_selected")
     selected_order = order_map[selected_order_label]
-    share_url = service_order_share_url(selected_order, settings.get("share_base_url") if settings else "")
+    share_base_url = resolve_share_base_url(
+        settings.get("share_base_url") if settings else "",
+        str(st.context.url),
+    )
+    share_url = service_order_share_url(selected_order, share_base_url)
     with st.container(border=True):
         st.subheader(f"{selected_order['number']} · envio e impressão", icon=":material/share:")
         st.text_input("Link individual para a equipe", value=share_url, key="os_share_link")

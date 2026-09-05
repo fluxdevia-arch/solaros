@@ -4,6 +4,7 @@ from solar_crm.branding import configured_app_name, configured_logo, normalize_b
 from solar_crm.db import clear_business_data, execute, get_db_path, query_one, using_postgres
 from solar_crm.document_cache import clear_document_caches
 from solar_crm.signature import normalize_signature_image
+from solar_crm.sharing import resolve_share_base_url
 from solar_crm.ui import flash, page_intro, show_flash
 
 page_intro("Configure a identidade dos documentos, o compartilhamento e a proteção dos dados.")
@@ -51,9 +52,9 @@ with left:
             )
             remove_signature = st.checkbox("Remover a assinatura manuscrita atual", disabled=not bool(settings["signature_image"]))
             share_base_url = st.text_input(
-                "URL para compartilhar ordens de serviço",
-                value=settings.get("share_base_url") or "http://localhost:8501",
-                help="Em rede local, use o endereço IP do computador. Quando hospedado, informe a URL pública do SolarOS.",
+                "URL para compartilhar ordens de serviço e vistorias",
+                value=resolve_share_base_url(settings.get("share_base_url"), str(st.context.url)),
+                help="Na hospedagem, o SolarOS detecta automaticamente o endereço público. Em rede local, você pode informar o IP do computador.",
             )
             footer = st.text_area("Rodapé e observação legal dos relatórios", value=settings["report_footer"] or "")
             if st.form_submit_button("Salvar configurações", type="primary", icon=":material/save:"):
