@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from solar_crm import config
 
@@ -44,6 +44,23 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("DOUBLE PRECISION", translated)
         self.assertIn("BYTEA", translated)
         self.assertIn("CREATE TABLE sample", translated)
+
+    def test_postgres_connection_is_clean_before_returning_to_pool(self):
+        from psycopg.pq import TransactionStatus
+
+        from solar_crm import db
+
+        wrapper = object.__new__(db.PostgresConnection)
+        wrapper._pool = Mock()
+        wrapper._connection = Mock()
+        wrapper._connection.info.transaction_status = TransactionStatus.INTRANS
+
+        connection = wrapper._connection
+        wrapper.close()
+
+        connection.rollback.assert_called_once_with()
+        wrapper._pool.putconn.assert_called_once_with(connection)
+        self.assertIsNone(wrapper._connection)
 
 
 if __name__ == "__main__":

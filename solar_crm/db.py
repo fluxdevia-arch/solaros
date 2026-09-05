@@ -119,8 +119,18 @@ class PostgresConnection:
 
     def close(self) -> None:
         if self._connection is not None:
-            self._pool.putconn(self._connection)
+            connection = self._connection
             self._connection = None
+            try:
+                from psycopg.pq import TransactionStatus
+
+                if connection.info.transaction_status in {
+                    TransactionStatus.INTRANS,
+                    TransactionStatus.INERROR,
+                }:
+                    connection.rollback()
+            finally:
+                self._pool.putconn(connection)
 
 
 def connect() -> sqlite3.Connection | PostgresConnection:

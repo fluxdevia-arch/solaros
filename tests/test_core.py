@@ -122,6 +122,20 @@ class DatabaseAndPdfTests(unittest.TestCase):
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 6000)
 
+    def test_seeded_database_integrity(self):
+        from solar_crm.db import connect, init_db
+
+        init_db(seed=True)
+        conn = connect()
+        try:
+            integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            foreign_key_violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        finally:
+            conn.close()
+
+        self.assertEqual(integrity, "ok")
+        self.assertEqual(foreign_key_violations, [])
+
 
 if __name__ == "__main__":
     unittest.main()
