@@ -140,23 +140,30 @@ with accounts_tab:
                 try:
                     with st.spinner("Consultando o portal do fabricante..."):
                         found = discover_remote_plants(connection_map[selected_connection])
-                    st.success(f"Conexão validada. {len(found)} usina(s) encontrada(s).", icon=":material/check_circle:")
-                    st.dataframe(
-                        pd.DataFrame([{
-                            "Usina remota": row.name,
-                            "ID remoto": row.remote_id,
-                            "Potência": row.capacity_kwp,
-                            "Potência atual": row.current_power_kw,
-                            "Energia acumulada": row.total_energy_kwh,
-                            "Status": row.status,
-                        } for row in found]),
-                        hide_index=True,
-                        column_config={
-                            "Potência": st.column_config.NumberColumn(format="%.2f kWp"),
-                            "Potência atual": st.column_config.NumberColumn(format="%.2f kW"),
-                            "Energia acumulada": st.column_config.NumberColumn(format="%.0f kWh"),
-                        },
-                    )
+                    if found:
+                        st.success(f"Conexão validada. {len(found)} usina(s) encontrada(s).", icon=":material/check_circle:")
+                        st.dataframe(
+                            pd.DataFrame([{
+                                "Usina remota": row.name,
+                                "ID remoto": row.remote_id,
+                                "Potência": row.capacity_kwp,
+                                "Potência atual": row.current_power_kw,
+                                "Energia acumulada": row.total_energy_kwh,
+                                "Status": row.status,
+                            } for row in found]),
+                            hide_index=True,
+                            column_config={
+                                "Potência": st.column_config.NumberColumn(format="%.2f kWp"),
+                                "Potência atual": st.column_config.NumberColumn(format="%.2f kW"),
+                                "Energia acumulada": st.column_config.NumberColumn(format="%.0f kWh"),
+                            },
+                        )
+                    else:
+                        st.warning(
+                            "A autenticação funcionou, mas a SolarZ não devolveu usinas para este Usuário de API. "
+                            "Confirme no SolarZ se o usuário possui acesso às usinas e teste novamente.",
+                            icon=":material/info:",
+                        )
                 except MonitoringError as exc:
                     st.error(str(exc))
 

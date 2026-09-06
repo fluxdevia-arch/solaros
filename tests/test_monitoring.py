@@ -111,8 +111,8 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(len(telemetry), 2)
         self.assertEqual(telemetry[0].expected_generation_kwh, 40.0)
         self.assertEqual(session.calls[0][1]["auth"], ("usuario-api", "senha-api"))
-        self.assertEqual(session.calls[0][1]["json"], {"page": "1", "pageSize": "20"})
-        self.assertEqual(session.calls[0][1]["params"], {"page": "1", "pageSize": "20"})
+        self.assertEqual(session.calls[0][1]["json"], {"page": "0", "pageSize": "20"})
+        self.assertEqual(session.calls[0][1]["params"], {"page": "0", "pageSize": "20"})
         self.assertIn("/openApi/seller/plant/energy/plantId/431/month/2026-08", session.calls[1][0])
 
     def test_solarz_explains_invalid_credentials(self):

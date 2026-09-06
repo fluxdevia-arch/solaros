@@ -171,9 +171,9 @@ class SolarZClient:
 
     def _list_all_plant_rows(self, path: str) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
-        # O contrato publicado pela SolarZ usa os exemplos page=1 e pageSize=20.
-        # A especificação declara o DTO de paginação na query e no corpo.
-        page = 1
+        # A página é zero-based no contrato oficial. O exemplo "1" representa
+        # a segunda página; por isso a descoberta deve sempre começar em zero.
+        page = 0
         while True:
             pagination = {"page": str(page), "pageSize": "20"}
             payload = self._post(path, pagination, query=pagination)
@@ -182,7 +182,7 @@ class SolarZClient:
             if not isinstance(payload, dict):
                 break
             total_pages = int(_float(payload.get("totalPages")))
-            if not page_rows or payload.get("last") is True or not total_pages or page >= total_pages:
+            if not page_rows or payload.get("last") is True or not total_pages or page + 1 >= total_pages:
                 break
             page += 1
         return rows
