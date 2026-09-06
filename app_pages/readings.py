@@ -1,5 +1,4 @@
 from datetime import date
-from io import StringIO
 
 import altair as alt
 import pandas as pd
@@ -7,6 +6,7 @@ import streamlit as st
 
 from solar_crm.calculations import calculate_coverage, calculate_performance, calculate_savings, money, number_br, percent
 from solar_crm.db import available_months, query, query_df, query_one, upsert_beneficiary_reading, upsert_reading
+from solar_crm.reading_spreadsheet import build_reading_template, read_reading_upload, validate_reading_rows
 from solar_crm.ui import date_br, flash, month_label, page_intro, plant_options, render_delete_control, show_flash
 
 page_intro("Registre consumo, geração, compensação e valores da concessionária para calcular economia e desempenho.")
@@ -26,8 +26,14 @@ p_map = plant_options(plants)
 with st.container(horizontal=True, horizontal_alignment="right"):
     add_reading = st.popover("Lançar leitura", icon=":material/add_chart:")
     import_data = st.popover("Importar planilha", icon=":material/upload_file:")
-    template = pd.DataFrame(columns=["usina_id", "mes_referencia", "consumo_kwh", "geracao_kwh", "energia_injetada_kwh", "energia_compensada_kwh", "tarifa_rs_kwh", "valor_fatura_rs", "custo_sem_solar_rs", "disponibilidade_pct", "horas_indisponivel", "ocorrencias", "observacoes"])
-    st.download_button("Baixar modelo", template.to_csv(index=False).encode("utf-8-sig"), "modelo_leituras.csv", "text/csv", icon=":material/download:")
+    template = build_reading_template(plants, date.today().replace(day=1).isoformat())
+    st.download_button(
+        "Baixar planilha Excel",
+        template,
+        "modelo_leituras.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        icon=":material/download:",
+    )
 
 with add_reading:
     with st.form("reading_form"):
@@ -72,44 +78,26 @@ with add_reading:
             st.rerun()
 
 with import_data:
-    st.caption("Use o modelo CSV e mantenha os nomes das colunas. O ID da usina aparece na tabela abaixo.")
-    uploaded = st.file_uploader("Arquivo CSV", type=["csv"], label_visibility="collapsed")
+    st.caption("Use o modelo Excel e mantenha os nomes das colunas. Também aceitamos arquivos CSV antigos.")
+    uploaded = st.file_uploader("Planilha Excel ou CSV", type=["xlsx", "csv"], label_visibility="collapsed")
     if uploaded is not None:
         try:
-            incoming = pd.read_csv(uploaded, sep=None, engine="python")
-            required = {"usina_id", "mes_referencia", "consumo_kwh", "geracao_kwh", "valor_fatura_rs", "custo_sem_solar_rs"}
-            missing = sorted(required - set(incoming.columns))
-            if missing:
-                st.error("Colunas obrigatórias ausentes: " + ", ".join(missing))
-            else:
-                st.dataframe(incoming.head(10), hide_index=True)
-                if st.button("Confirmar importação", type="primary", icon=":material/upload:"):
-                    plant_lookup = {int(row["id"]): row for row in plants}
-                    imported = 0
-                    for _, row in incoming.iterrows():
-                        pid = int(row["usina_id"])
-                        if pid not in plant_lookup:
-                            continue
-                        month = pd.to_datetime(row["mes_referencia"]).date().replace(day=1).isoformat()
-                        upsert_reading({
-                            "plant_id": pid,
-                            "reference_month": month,
-                            "consumption_kwh": float(row.get("consumo_kwh", 0) or 0),
-                            "generation_kwh": float(row.get("geracao_kwh", 0) or 0),
-                            "injected_kwh": float(row.get("energia_injetada_kwh", 0) or 0),
-                            "compensated_kwh": float(row.get("energia_compensada_kwh", 0) or 0),
-                            "tariff": float(row.get("tarifa_rs_kwh", 0) or 0),
-                            "billed_amount": float(row.get("valor_fatura_rs", 0) or 0),
-                            "reference_amount": float(row.get("custo_sem_solar_rs", 0) or 0),
-                            "availability_pct": float(row.get("disponibilidade_pct", 100) or 100),
-                            "performance_ratio": calculate_performance(float(row.get("geracao_kwh", 0) or 0), plant_lookup[pid]["expected_monthly_kwh"]),
-                            "downtime_hours": float(row.get("horas_indisponivel", 0) or 0),
-                            "incidents": int(row.get("ocorrencias", 0) or 0),
-                            "failure_notes": str(row.get("observacoes", "") or ""),
-                            "meter_reading": "Importação CSV",
-                        })
-                        imported += 1
-                    flash(f"{imported} leitura(s) importada(s).")
+            incoming = read_reading_upload(uploaded)
+            st.dataframe(incoming.head(10), hide_index=True)
+            if st.button("Confirmar importação", type="primary", icon=":material/upload:"):
+                plant_lookup = {int(row["id"]): row for row in plants}
+                records, errors = validate_reading_rows(incoming, set(plant_lookup))
+                if errors:
+                    st.error("Corrija a planilha antes de importar:\n\n- " + "\n- ".join(errors))
+                else:
+                    for record in records:
+                        record["performance_ratio"] = calculate_performance(
+                            record["generation_kwh"],
+                            plant_lookup[record["plant_id"]]["expected_monthly_kwh"],
+                        )
+                        record["meter_reading"] = f"Importação {uploaded.name}"
+                        upsert_reading(record)
+                    flash(f"{len(records)} leitura(s) importada(s).")
                     st.rerun()
         except Exception as exc:
             st.error(f"Não foi possível ler o arquivo: {exc}")
