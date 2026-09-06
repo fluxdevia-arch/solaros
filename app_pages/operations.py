@@ -164,7 +164,7 @@ with calendar_tab:
                   c.name AS "Cliente", p.name AS "Usina", 'Equipe técnica' AS "Responsável", 'Planejar' AS "Status"
            FROM plants p JOIN clients c ON c.id=p.client_id
            WHERE date(p.next_cleaning_date) BETWEEN date('now') AND date(?)
-           ORDER BY Data""",
+           ORDER BY 1""",
         (horizon.isoformat(), horizon.isoformat()),
     )
     st.caption("Próximos 45 dias, incluindo limpezas previstas na ficha das usinas.")

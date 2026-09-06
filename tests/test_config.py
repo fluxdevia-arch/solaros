@@ -22,6 +22,18 @@ class DatabaseConfigurationTests(unittest.TestCase):
 
         self.assertEqual(offenders, [], "Use double quotes for PostgreSQL column aliases")
 
+    def test_pages_do_not_order_by_unquoted_display_aliases(self):
+        pages_dir = Path(__file__).resolve().parents[1] / "app_pages"
+        invalid_order = re.compile(r"\bORDER\s+BY\s+(?!CASE\b)[A-ZÀ-Ý][\wÀ-ÿ]*")
+
+        offenders = [
+            path.name
+            for path in pages_dir.glob("*.py")
+            if invalid_order.search(path.read_text(encoding="utf-8"))
+        ]
+
+        self.assertEqual(offenders, [], "Quote display aliases or order by column position")
+
     def test_builds_encoded_postgres_url_from_separate_secrets(self):
         values = {
             "url": "",
