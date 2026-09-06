@@ -13,3 +13,8 @@ dependencies = [
     "psycopg[binary,pool]>=3.2.0",
     "cryptography>=45.0.0",
 ]
+
+[project.optional-dependencies]
+collector = [
+    "pymodbus[serial]>=3.11,<4",
+]

@@ -364,22 +364,47 @@ with api_tab:
             hide_index=True,
             column_config={"Última sincronização": st.column_config.DatetimeColumn(format="DD/MM/YYYY HH:mm")},
         )
-        source_map = {f"{row['name']} · {row['provider']}": int(row["id"]) for row in sources}
-        with st.container(border=True):
-            st.subheader("Sincronizar equipamentos", icon=":material/sync:")
-            with st.container(horizontal=True, vertical_alignment="bottom"):
-                sync_source = st.selectbox("Fonte", list(source_map), key="equipment_sync_source")
-                sync_day = st.date_input("Data", value=reading_day, key="equipment_sync_day")
-                if st.button("Sincronizar agora", type="primary", icon=":material/sync:"):
-                    try:
-                        with st.spinner("Consultando strings e alarmes do inversor..."):
-                            result = sync_equipment_integration(source_map[sync_source], sync_day)
-                        flash(
-                            f"Sincronização concluída: {result.string_samples} amostras e {result.alarms} alarmes recebidos."
-                        )
-                        st.rerun()
-                    except EquipmentAnalysisError as exc:
-                        st.error(str(exc))
+        remote_sources = [row for row in sources if row["provider"] != PHB85K_MT]
+        if remote_sources:
+            source_map = {f"{row['name']} · {row['provider']}": int(row["id"]) for row in remote_sources}
+            with st.container(border=True):
+                st.subheader("Sincronizar equipamentos", icon=":material/sync:")
+                with st.container(horizontal=True, vertical_alignment="bottom"):
+                    sync_source = st.selectbox("Fonte", list(source_map), key="equipment_sync_source")
+                    sync_day = st.date_input("Data", value=reading_day, key="equipment_sync_day")
+                    if st.button("Sincronizar agora", type="primary", icon=":material/sync:"):
+                        try:
+                            with st.spinner("Consultando strings e alarmes do inversor..."):
+                                result = sync_equipment_integration(source_map[sync_source], sync_day)
+                            flash(
+                                f"Sincronização concluída: {result.string_samples} amostras e {result.alarms} alarmes recebidos."
+                            )
+                            st.rerun()
+                        except EquipmentAnalysisError as exc:
+                            st.error(str(exc))
+        phb_sources = [row for row in sources if row["provider"] == PHB85K_MT]
+        if phb_sources:
+            with st.container(border=True):
+                st.subheader("Instalar coletor PHB", icon=":material/cable:")
+                phb_source_map = {row["name"]: row for row in phb_sources}
+                selected_phb_name = st.selectbox("Equipamento PHB", list(phb_source_map), key="phb_collector_source")
+                selected_phb = phb_source_map[selected_phb_name]
+                configured_address = int(selected_phb.get("device_sn") or 48) if str(selected_phb.get("device_sn") or "").isdigit() else 48
+                ready_config = phb85k_mt_collector_config(
+                    modbus_address=configured_address,
+                    integration_id=int(selected_phb["id"]),
+                )
+                st.download_button(
+                    "Baixar configuração vinculada à usina",
+                    data=json.dumps(ready_config, ensure_ascii=False, indent=2),
+                    file_name=f"phb85k-mt-{configured_address:03d}-coletor.json",
+                    mime="application/json",
+                    icon=":material/download:",
+                    type="primary",
+                )
+                st.caption(
+                    "Esse arquivo já contém o identificador da fonte no Supabase. A senha do banco não é incluída."
+                )
     else:
         st.info("Nenhuma fonte de equipamento foi configurada para esta usina.", icon=":material/info:")
 
@@ -426,7 +451,8 @@ with api_tab:
                 icon=":material/download:",
             )
             st.warning(
-                "A PHB confirma Modbus RTU, mas o manual público não traz a tabela de registradores nem todos "
+                "Este é um modelo ainda não vinculado à usina. Depois de salvar a fonte, baixe a configuração "
+                "vinculada na seção Instalar coletor PHB. A PHB não publica a tabela de registradores nem todos "
                 "os parâmetros seriais. O coletor não fará leituras até esses dados serem confirmados no mapa "
                 "oficial do modelo.",
                 icon=":material/warning:",
@@ -443,27 +469,36 @@ with api_tab:
                 value="PHB85K-MT · 048" if provider == PHB85K_MT else "",
                 placeholder="Ex.: Inversor 1 · telhado norte",
             )
-            base_url = st.text_input("Endereço-base HTTPS", placeholder="https://api.fabricante.com")
             device_sn = st.text_input(
-                "Número de série / ID do inversor",
+                "Endereço Modbus ou número de série",
                 value="048" if provider == PHB85K_MT else "",
             )
-            auth_type = st.selectbox("Autenticação", AUTH_TYPES)
-            api_key = st.text_input(
-                "Usuário ou nome do cabeçalho",
-                help="No modo API key, use por exemplo X-API-Key. No Basic Auth, informe o usuário.",
-            )
-            api_secret = st.text_input("Token, senha ou segredo", type="password")
-            strings_path = st.text_input(
-                "Endpoint de strings",
-                value="/equipment/{device_sn}/strings?date={date}",
-                help="Marcadores aceitos: {device_sn} e {date}.",
-            )
-            alarms_path = st.text_input(
-                "Endpoint de alarmes",
-                value="/equipment/{device_sn}/alarms?date={date}",
-                help="Marcadores aceitos: {device_sn} e {date}.",
-            )
+            if provider == PHB85K_MT:
+                base_url = "https://collector.local"
+                auth_type = "Sem autenticação"
+                api_key = ""
+                api_secret = ""
+                strings_path = "/equipment/{device_sn}/strings?date={date}"
+                alarms_path = "/equipment/{device_sn}/alarms?date={date}"
+                st.caption("O coletor grava diretamente no Supabase; não é necessário informar uma URL de API.")
+            else:
+                base_url = st.text_input("Endereço-base HTTPS", placeholder="https://api.fabricante.com")
+                auth_type = st.selectbox("Autenticação", AUTH_TYPES)
+                api_key = st.text_input(
+                    "Usuário ou nome do cabeçalho",
+                    help="No modo API key, use por exemplo X-API-Key. No Basic Auth, informe o usuário.",
+                )
+                api_secret = st.text_input("Token, senha ou segredo", type="password")
+                strings_path = st.text_input(
+                    "Endpoint de strings",
+                    value="/equipment/{device_sn}/strings?date={date}",
+                    help="Marcadores aceitos: {device_sn} e {date}.",
+                )
+                alarms_path = st.text_input(
+                    "Endpoint de alarmes",
+                    value="/equipment/{device_sn}/alarms?date={date}",
+                    help="Marcadores aceitos: {device_sn} e {date}.",
+                )
             if st.form_submit_button("Salvar fonte protegida", type="primary", icon=":material/lock:"):
                 try:
                     create_equipment_integration(

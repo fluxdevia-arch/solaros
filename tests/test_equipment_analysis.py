@@ -48,7 +48,7 @@ class EquipmentDiagnosticTests(unittest.TestCase):
         self.assertEqual(profile["string_count"], 16)
         self.assertEqual(config["modbus_address"], 48)
         self.assertEqual(config["collector_mode"], "read_only")
-        self.assertEqual(config["register_map"], "SOLICITAR_MAPA_OFICIAL_PHB")
+        self.assertEqual(config["registers"]["status"], "AGUARDANDO_MAPA_OFICIAL_PHB")
 
     def test_phb85k_collector_rejects_invalid_modbus_address(self):
         with self.assertRaises(EquipmentAnalysisError):

@@ -82,7 +82,11 @@ def equipment_profile(provider: str) -> dict[str, Any] | None:
     return dict(profile) if profile else None
 
 
-def phb85k_mt_collector_config(*, modbus_address: int = 48) -> dict[str, Any]:
+def phb85k_mt_collector_config(
+    *,
+    modbus_address: int = 48,
+    integration_id: int | None = None,
+) -> dict[str, Any]:
     """Build the safe, read-only handoff used by the on-site PHB collector.
 
     PHB's public user manual confirms Modbus RTU but does not publish the
@@ -91,9 +95,32 @@ def phb85k_mt_collector_config(*, modbus_address: int = 48) -> dict[str, Any]:
     """
     if not 1 <= int(modbus_address) <= 247:
         raise EquipmentAnalysisError("O endereço Modbus deve ficar entre 1 e 247.")
+    string_registers = []
+    for string_number in range(1, 17):
+        mppt_number = ((string_number - 1) // 4) + 1
+        string_registers.append(
+            {
+                "string_name": f"S{string_number}",
+                "mppt": f"MPPT {mppt_number}",
+                "current_a": {
+                    "address": None,
+                    "table": "input",
+                    "data_type": "uint16",
+                    "scale": None,
+                },
+                "voltage_v": {
+                    "address": None,
+                    "table": "input",
+                    "data_type": "uint16",
+                    "scale": None,
+                },
+            }
+        )
     return {
         "manufacturer": "PHB",
         "model": "PHB85K-MT",
+        "device_name": "PHB85K-MT · 048",
+        "integration_id": integration_id,
         "collector_mode": "read_only",
         "transport": "modbus_rtu",
         "serial_port": "COM3 ou /dev/ttyUSB0",
@@ -101,17 +128,18 @@ def phb85k_mt_collector_config(*, modbus_address: int = 48) -> dict[str, Any]:
         "baudrate": "CONFIRMAR_NO_INVERSOR",
         "parity": "CONFIRMAR_NO_INVERSOR",
         "stop_bits": "CONFIRMAR_NO_INVERSOR",
-        "register_map": "SOLICITAR_MAPA_OFICIAL_PHB",
+        "database_url_env": "SOLAROS_DATABASE_URL",
+        "offline_queue": "solaros-collector-queue.db",
         "poll_interval_seconds": 60,
         "topology": {
             "mppt_count": 4,
             "strings_per_mppt": 4,
             "string_count": 16,
         },
-        "publish": {
-            "protocol": "https",
-            "strings_path": "/equipment/{device_sn}/strings?date={date}",
-            "alarms_path": "/equipment/{device_sn}/alarms?date={date}",
+        "registers": {
+            "status": "AGUARDANDO_MAPA_OFICIAL_PHB",
+            "strings": string_registers,
+            "alarms": [],
         },
     }
 
