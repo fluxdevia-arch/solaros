@@ -111,7 +111,16 @@ def _check_response(response: requests.Response, provider: str) -> Any:
         response.raise_for_status()
         payload = response.json()
     except requests.RequestException as exc:
-        raise MonitoringError(f"{provider}: falha HTTP ao acessar o portal ({exc}).") from exc
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        if status_code in {401, 403}:
+            message = "credencial recusada. Gere um Usuário de API na SolarZ e substitua o usuário e a senha cadastrados."
+        elif status_code == 400:
+            message = "a SolarZ recusou os parâmetros da consulta. O conector foi ajustado ao schema oficial; tente novamente."
+        elif status_code == 404:
+            message = "rota da API não encontrada. Confirme se o endereço cadastrado é https://app.solarz.com.br."
+        else:
+            message = f"falha HTTP ao acessar o portal ({exc})."
+        raise MonitoringError(f"{provider}: {message}") from exc
     except ValueError as exc:
         raise MonitoringError(f"{provider}: o portal retornou uma resposta inválida.") from exc
     if not isinstance(payload, (dict, list)):
@@ -144,27 +153,36 @@ class SolarZClient:
         self.base_url = _validated_base_url(base_url)
         self.session = session or requests.Session()
 
-    def _post(self, path: str, data: dict[str, Any] | None = None) -> Any:
+    def _post(
+        self,
+        path: str,
+        data: dict[str, Any] | None = None,
+        query: dict[str, Any] | None = None,
+    ) -> Any:
         response = self.session.post(
             f"{self.base_url}{path}",
             json=data or {},
+            params=query,
             auth=(self.username, self.password),
-            headers={"Accept": "application/json"},
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
             timeout=25,
         )
         return _check_response(response, SOLARZ)
 
     def _list_all_plant_rows(self, path: str) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
-        page = 0
+        # O contrato publicado pela SolarZ usa os exemplos page=1 e pageSize=20.
+        # A especificação declara o DTO de paginação na query e no corpo.
+        page = 1
         while True:
-            payload = self._post(path, {"page": str(page), "pageSize": "100"})
+            pagination = {"page": str(page), "pageSize": "20"}
+            payload = self._post(path, pagination, query=pagination)
             page_rows = _first_list(payload, ("content", "plants", "list", "records"))
             rows.extend(page_rows)
             if not isinstance(payload, dict):
                 break
             total_pages = int(_float(payload.get("totalPages")))
-            if not page_rows or total_pages <= page + 1:
+            if not page_rows or payload.get("last") is True or not total_pages or page >= total_pages:
                 break
             page += 1
         return rows

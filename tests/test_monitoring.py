@@ -32,11 +32,17 @@ class _FakeConnector:
 
 
 class _FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self.payload = payload
+        self.status_code = status_code
 
     def raise_for_status(self):
-        return None
+        if self.status_code >= 400:
+            import requests
+
+            response = requests.Response()
+            response.status_code = self.status_code
+            raise requests.HTTPError(response=response)
 
     def json(self):
         return self.payload
@@ -105,7 +111,17 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(len(telemetry), 2)
         self.assertEqual(telemetry[0].expected_generation_kwh, 40.0)
         self.assertEqual(session.calls[0][1]["auth"], ("usuario-api", "senha-api"))
+        self.assertEqual(session.calls[0][1]["json"], {"page": "1", "pageSize": "20"})
+        self.assertEqual(session.calls[0][1]["params"], {"page": "1", "pageSize": "20"})
         self.assertIn("/openApi/seller/plant/energy/plantId/431/month/2026-08", session.calls[1][0])
+
+    def test_solarz_explains_invalid_credentials(self):
+        class UnauthorizedSession:
+            def post(self, url, **kwargs):
+                return _FakeResponse({}, status_code=401)
+
+        with self.assertRaisesRegex(Exception, "credencial recusada"):
+            SolarZClient("usuario-api", "senha-api", session=UnauthorizedSession()).list_plants()
 
     def test_solarz_is_the_primary_provider(self):
         from solar_crm.monitoring import SUPPORTED_PROVIDERS
