@@ -29,7 +29,9 @@ DEFAULT_URLS = {
 
 
 class MonitoringError(RuntimeError):
-    pass
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 @dataclass(frozen=True)
@@ -120,7 +122,7 @@ def _check_response(response: requests.Response, provider: str) -> Any:
             message = "rota da API não encontrada. Confirme se o endereço cadastrado é https://app.solarz.com.br."
         else:
             message = f"falha HTTP ao acessar o portal ({exc})."
-        raise MonitoringError(f"{provider}: {message}") from exc
+        raise MonitoringError(f"{provider}: {message}", status_code=status_code) from exc
     except ValueError as exc:
         raise MonitoringError(f"{provider}: o portal retornou uma resposta inválida.") from exc
     if not isinstance(payload, (dict, list)):
@@ -171,9 +173,8 @@ class SolarZClient:
 
     def _list_all_plant_rows(self, path: str) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
-        # A página é zero-based no contrato oficial. O exemplo "1" representa
-        # a segunda página; por isso a descoberta deve sempre começar em zero.
-        page = 0
+        # A API em produção da SolarZ rejeita page=0 e aceita page=1.
+        page = 1
         while True:
             pagination = {"page": str(page), "pageSize": "20"}
             payload = self._post(path, pagination, query=pagination)
@@ -182,7 +183,7 @@ class SolarZClient:
             if not isinstance(payload, dict):
                 break
             total_pages = int(_float(payload.get("totalPages")))
-            if not page_rows or payload.get("last") is True or not total_pages or page + 1 >= total_pages:
+            if not page_rows or payload.get("last") is True or not total_pages or page >= total_pages:
                 break
             page += 1
         return rows
@@ -190,7 +191,13 @@ class SolarZClient:
     def list_plants(self) -> list[RemotePlant]:
         try:
             rows = self._list_all_plant_rows("/openApi/seller/plantWithInfos/list")
-        except MonitoringError:
+        except MonitoringError as exc:
+            if exc.status_code not in {400, 404}:
+                raise
+            rows = []
+        # Contas sem dados premium podem receber uma lista vazia na rota com
+        # informações adicionais, mesmo possuindo usinas na listagem padrão.
+        if not rows:
             rows = self._list_all_plant_rows("/openApi/seller/plant/list")
         plants: list[RemotePlant] = []
         for row in rows:

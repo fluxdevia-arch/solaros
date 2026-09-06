@@ -111,9 +111,27 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(len(telemetry), 2)
         self.assertEqual(telemetry[0].expected_generation_kwh, 40.0)
         self.assertEqual(session.calls[0][1]["auth"], ("usuario-api", "senha-api"))
-        self.assertEqual(session.calls[0][1]["json"], {"page": "0", "pageSize": "20"})
-        self.assertEqual(session.calls[0][1]["params"], {"page": "0", "pageSize": "20"})
+        self.assertEqual(session.calls[0][1]["json"], {"page": "1", "pageSize": "20"})
+        self.assertEqual(session.calls[0][1]["params"], {"page": "1", "pageSize": "20"})
         self.assertIn("/openApi/seller/plant/energy/plantId/431/month/2026-08", session.calls[1][0])
+
+    def test_solarz_falls_back_to_standard_list_when_detailed_list_is_empty(self):
+        class StandardListSession:
+            def __init__(self):
+                self.calls = []
+
+            def post(self, url, **kwargs):
+                self.calls.append(url)
+                if "plantWithInfos/list" in url:
+                    return _FakeResponse({"content": [], "totalPages": 1, "last": True})
+                return _FakeResponse({"content": [{"id": 72, "name": "Usina padrão", "installedPower": 12.4}]})
+
+        session = StandardListSession()
+        plants = SolarZClient("usuario-api", "senha-api", session=session).list_plants()
+
+        self.assertEqual(len(plants), 1)
+        self.assertEqual(plants[0].remote_id, "72")
+        self.assertTrue(any("/openApi/seller/plant/list" in url for url in session.calls))
 
     def test_solarz_explains_invalid_credentials(self):
         class UnauthorizedSession:
