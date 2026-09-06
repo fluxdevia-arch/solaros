@@ -69,6 +69,31 @@ class StreamlitSmokeTest(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertTrue(any("Portal Solar Parceiro" in item.value for item in app.markdown))
 
+    def test_plant_page_renders_equipment_inventory_with_saved_asset(self):
+        from solar_crm.db import query_one
+        from solar_crm.plant_equipment import create_equipment
+
+        app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        app = AppTest.from_file(app_path, default_timeout=20).run()
+        plant = query_one("SELECT id FROM plants ORDER BY id LIMIT 1")
+        create_equipment(plant["id"], {
+            "equipment_type": "Inversor",
+            "manufacturer": "Growatt",
+            "model": "MID 20KTL3-X",
+            "quantity": 1,
+            "serial_numbers": "GW-TEST-001",
+            "nominal_power": 20,
+            "power_unit": "kW",
+            "status": "Operando",
+        })
+
+        app.session_state["selected_plant_id"] = plant["id"]
+        app.switch_page("app_pages/plants.py").run()
+
+        self.assertFalse(app.exception)
+        self.assertIn("plant_equipment_selector", app.session_state)
+        self.assertTrue(any(metric.label == "Inversores" and metric.value == "1" for metric in app.metric))
+
     def test_all_pages_render_with_an_empty_database(self):
         previous_seed = os.environ.get("SOLAROS_SEED_DEMO")
         os.environ["SOLAROS_SEED_DEMO"] = "false"

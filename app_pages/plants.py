@@ -5,10 +5,23 @@ import streamlit as st
 
 from solar_crm.calculations import number_br, percent
 from solar_crm.db import execute, query, query_df, query_one
+from solar_crm.plant_equipment import (
+    EQUIPMENT_STATUSES,
+    EQUIPMENT_TYPES,
+    MAX_PHOTOS_PER_EQUIPMENT,
+    POWER_UNITS,
+    add_equipment_photo,
+    create_equipment,
+    ensure_equipment_inventory_schema,
+    equipment_for_plant,
+    equipment_photos,
+    update_equipment,
+)
 from solar_crm.ui import client_options, date_br, flash, page_intro, plant_options, render_delete_control, show_flash, status_badge
 
 page_intro("Inventário técnico completo, histórico de desempenho e observações específicas de cada usina.")
 show_flash()
+ensure_equipment_inventory_schema()
 
 clients = query("SELECT id, name FROM clients WHERE status='Ativo' ORDER BY name")
 all_plants = query(
@@ -88,8 +101,9 @@ with st.container(horizontal=True):
     st.metric("Beneficiárias ativas", beneficiary_summary["count"], border=True)
     st.metric("Integração", plant["monitoring_provider"] or "Não vinculada", border=True)
 
-technical, beneficiaries_tab, history, notes_tab = st.tabs([
+technical, equipment_tab, beneficiaries_tab, history, notes_tab = st.tabs([
     ":material/memory: Ficha técnica",
+    ":material/solar_power: Equipamentos",
     ":material/account_tree: Beneficiárias",
     ":material/query_stats: Histórico",
     ":material/sticky_note_2: Observações",
@@ -145,6 +159,195 @@ with technical:
         state_keys=("selected_plant_id", "report_pdf", "report_key"),
         extra_warning="As leituras e beneficiárias desta usina deixarão de compor os relatórios.",
     )
+
+with equipment_tab:
+    equipment_rows = equipment_for_plant(plant_id)
+    inverter_count = sum(int(row["quantity"] or 0) for row in equipment_rows if row["equipment_type"] == "Inversor")
+    panel_count = sum(int(row["quantity"] or 0) for row in equipment_rows if row["equipment_type"] == "Painel solar")
+    photo_count = sum(int(row["photo_count"] or 0) for row in equipment_rows)
+
+    with st.container(horizontal=True):
+        st.metric("Inversores", inverter_count, border=True)
+        st.metric("Painéis solares", panel_count, border=True)
+        st.metric("Fotos cadastradas", photo_count, border=True)
+
+    with st.container(horizontal=True, horizontal_alignment="right"):
+        add_equipment = st.popover("Cadastrar equipamento", icon=":material/add:")
+
+    with add_equipment:
+        with st.form("new_plant_equipment", clear_on_submit=True):
+            new_type = st.selectbox("Tipo", EQUIPMENT_TYPES, key="new_equipment_type")
+            new_manufacturer = st.text_input("Fabricante")
+            new_model = st.text_input("Modelo")
+            new_quantity = st.number_input("Quantidade", min_value=1, value=1, step=1)
+            new_serials = st.text_area(
+                "Números de série",
+                help="Informe um número por linha. Também é possível separar por vírgula.",
+            )
+            new_power = st.number_input("Potência nominal", min_value=0.0, step=0.1)
+            new_power_unit = st.selectbox("Unidade da potência", POWER_UNITS)
+            new_installation = st.date_input("Data de instalação", value=None)
+            new_warranty = st.date_input("Garantia até", value=None)
+            new_location = st.text_input("Localização na usina", placeholder="Ex.: parede norte, cobertura bloco A")
+            new_status = st.selectbox("Status", EQUIPMENT_STATUSES)
+            new_notes = st.text_area("Dados técnicos e observações")
+            new_photos = st.file_uploader(
+                "Fotos do equipamento",
+                type=["jpg", "jpeg", "png", "webp"],
+                accept_multiple_files=True,
+                max_upload_size=12,
+            ) or []
+            if st.form_submit_button("Salvar equipamento", type="primary", icon=":material/save:"):
+                if len(new_photos) > MAX_PHOTOS_PER_EQUIPMENT:
+                    st.error(f"Envie no máximo {MAX_PHOTOS_PER_EQUIPMENT} fotos por equipamento.")
+                else:
+                    try:
+                        equipment_id = create_equipment(plant_id, {
+                            "equipment_type": new_type,
+                            "manufacturer": new_manufacturer,
+                            "model": new_model,
+                            "quantity": new_quantity,
+                            "serial_numbers": new_serials,
+                            "nominal_power": new_power,
+                            "power_unit": new_power_unit,
+                            "installation_date": new_installation.isoformat() if new_installation else None,
+                            "warranty_expiry": new_warranty.isoformat() if new_warranty else None,
+                            "location": new_location,
+                            "status": new_status,
+                            "notes": new_notes,
+                        })
+                        for uploaded in new_photos:
+                            add_equipment_photo(equipment_id, uploaded.getvalue(), uploaded.name, uploaded.name)
+                        flash("Equipamento e fotos cadastrados com sucesso.")
+                        st.rerun()
+                    except (ValueError, OSError) as exc:
+                        st.error(str(exc))
+
+    if not equipment_rows:
+        st.info("Nenhum inversor ou painel cadastrado nesta usina.", icon=":material/info:")
+    else:
+        equipment_df = pd.DataFrame(equipment_rows).rename(columns={
+            "equipment_type": "Tipo", "manufacturer": "Fabricante", "model": "Modelo",
+            "quantity": "Quantidade", "serial_numbers": "Números de série",
+            "nominal_power": "Potência", "power_unit": "Unidade", "status": "Status",
+            "photo_count": "Fotos",
+        })
+        st.dataframe(
+            equipment_df[["Tipo", "Fabricante", "Modelo", "Quantidade", "Números de série", "Potência", "Unidade", "Status", "Fotos"]],
+            hide_index=True,
+            column_config={
+                "Tipo": st.column_config.TextColumn(pinned=True),
+                "Quantidade": st.column_config.NumberColumn(format="%d"),
+                "Potência": st.column_config.NumberColumn(format="%.2f"),
+            },
+        )
+
+        equipment_map = {
+            f"#{row['id']} · {row['equipment_type']} · {row['manufacturer'] or 'Sem fabricante'} {row['model'] or ''}": row
+            for row in equipment_rows
+        }
+        equipment_label = st.selectbox("Equipamento para consultar ou editar", list(equipment_map), key="plant_equipment_selector")
+        selected_equipment = equipment_map[equipment_label]
+
+        with st.container(border=True):
+            st.subheader(
+                f"{selected_equipment['equipment_type']} · {selected_equipment['manufacturer'] or 'Fabricante não informado'}",
+                icon=":material/memory:",
+            )
+            st.table({
+                "Modelo": selected_equipment["model"] or "-",
+                "Quantidade": str(selected_equipment["quantity"]),
+                "Potência nominal": f"{number_br(selected_equipment['nominal_power'], 2)} {selected_equipment['power_unit']}",
+                "Números de série": (selected_equipment["serial_numbers"] or "-").replace("\n", " · "),
+                "Instalação": date_br(selected_equipment["installation_date"]),
+                "Garantia até": date_br(selected_equipment["warranty_expiry"]),
+                "Localização": selected_equipment["location"] or "-",
+                "Status": selected_equipment["status"],
+                "Observações": selected_equipment["notes"] or "-",
+            }, border="horizontal", width="stretch")
+
+        with st.expander("Editar equipamento", icon=":material/edit:"):
+            with st.form(f"edit_plant_equipment_{selected_equipment['id']}"):
+                edit_key = f"equipment_edit_{selected_equipment['id']}"
+                edit_type = st.selectbox("Tipo", EQUIPMENT_TYPES, index=EQUIPMENT_TYPES.index(selected_equipment["equipment_type"]), key=f"{edit_key}_type")
+                edit_manufacturer = st.text_input("Fabricante", value=selected_equipment["manufacturer"] or "", key=f"{edit_key}_manufacturer")
+                edit_model = st.text_input("Modelo", value=selected_equipment["model"] or "", key=f"{edit_key}_model")
+                edit_quantity = st.number_input("Quantidade", min_value=1, value=int(selected_equipment["quantity"]), step=1, key=f"{edit_key}_quantity")
+                edit_serials = st.text_area("Números de série", value=selected_equipment["serial_numbers"] or "", key=f"{edit_key}_serials")
+                edit_power = st.number_input("Potência nominal", min_value=0.0, value=float(selected_equipment["nominal_power"] or 0), step=0.1, key=f"{edit_key}_power")
+                edit_unit = st.selectbox("Unidade da potência", POWER_UNITS, index=POWER_UNITS.index(selected_equipment["power_unit"]) if selected_equipment["power_unit"] in POWER_UNITS else 0, key=f"{edit_key}_unit")
+                edit_installation = st.date_input("Data de instalação", value=date.fromisoformat(selected_equipment["installation_date"]) if selected_equipment["installation_date"] else None, key=f"{edit_key}_installation")
+                edit_warranty = st.date_input("Garantia até", value=date.fromisoformat(selected_equipment["warranty_expiry"]) if selected_equipment["warranty_expiry"] else None, key=f"{edit_key}_warranty")
+                edit_location = st.text_input("Localização", value=selected_equipment["location"] or "", key=f"{edit_key}_location")
+                edit_status = st.selectbox("Status", EQUIPMENT_STATUSES, index=EQUIPMENT_STATUSES.index(selected_equipment["status"]) if selected_equipment["status"] in EQUIPMENT_STATUSES else 0, key=f"{edit_key}_status")
+                edit_notes = st.text_area("Dados técnicos e observações", value=selected_equipment["notes"] or "", key=f"{edit_key}_notes")
+                if st.form_submit_button("Atualizar equipamento", type="primary", icon=":material/save:"):
+                    update_equipment(selected_equipment["id"], {
+                        "equipment_type": edit_type, "manufacturer": edit_manufacturer,
+                        "model": edit_model, "quantity": edit_quantity,
+                        "serial_numbers": edit_serials, "nominal_power": edit_power,
+                        "power_unit": edit_unit,
+                        "installation_date": edit_installation.isoformat() if edit_installation else None,
+                        "warranty_expiry": edit_warranty.isoformat() if edit_warranty else None,
+                        "location": edit_location, "status": edit_status, "notes": edit_notes,
+                    })
+                    flash("Equipamento atualizado.")
+                    st.rerun()
+
+        photos = equipment_photos(selected_equipment["id"])
+        st.subheader("Fotos do equipamento", icon=":material/photo_library:")
+        if photos:
+            for start in range(0, len(photos), 2):
+                photo_columns = st.columns(2)
+                for offset, photo in enumerate(photos[start:start + 2]):
+                    with photo_columns[offset].container(border=True):
+                        st.image(bytes(photo["image_data"]), width="stretch")
+                        st.caption(photo["caption"] or photo["filename"] or "Foto do equipamento")
+                        render_delete_control(
+                            "plant_equipment_photo", photo["id"],
+                            f"foto {photo['filename'] or photo['id']}",
+                        )
+        else:
+            st.caption("Nenhuma foto cadastrada para este equipamento.")
+
+        if len(photos) < MAX_PHOTOS_PER_EQUIPMENT:
+            photo_cycle_key = f"equipment_photo_cycle_{selected_equipment['id']}"
+            photo_cycle = int(st.session_state.get(photo_cycle_key, 0))
+            with st.expander("Adicionar fotos", icon=":material/add_a_photo:"):
+                photo_caption = st.text_input("Legenda das novas fotos", key=f"equipment_photo_caption_{selected_equipment['id']}_{photo_cycle}")
+                uploaded_photos = st.file_uploader(
+                    "Escolher fotos da galeria",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    accept_multiple_files=True,
+                    max_upload_size=12,
+                    key=f"equipment_photo_upload_{selected_equipment['id']}_{photo_cycle}",
+                )
+                camera_photo = st.camera_input(
+                    "Ou tirar uma foto agora",
+                    resolution="1080p",
+                    key=f"equipment_camera_{selected_equipment['id']}_{photo_cycle}",
+                )
+                if st.button("Salvar novas fotos", type="primary", icon=":material/save:", key=f"save_equipment_photos_{selected_equipment['id']}_{photo_cycle}"):
+                    pending_photos = list(uploaded_photos or []) + ([camera_photo] if camera_photo else [])
+                    if not pending_photos:
+                        st.error("Escolha ou tire pelo menos uma foto.")
+                    elif len(photos) + len(pending_photos) > MAX_PHOTOS_PER_EQUIPMENT:
+                        st.error(f"Cada equipamento aceita até {MAX_PHOTOS_PER_EQUIPMENT} fotos.")
+                    else:
+                        try:
+                            for uploaded in pending_photos:
+                                add_equipment_photo(selected_equipment["id"], uploaded.getvalue(), uploaded.name, photo_caption)
+                            st.session_state[photo_cycle_key] = photo_cycle + 1
+                            flash(f"{len(pending_photos)} foto(s) salva(s).")
+                            st.rerun()
+                        except (ValueError, OSError) as exc:
+                            st.error(str(exc))
+
+        render_delete_control(
+            "plant_equipment", selected_equipment["id"],
+            f"equipamento {selected_equipment['equipment_type']} {selected_equipment['model'] or ''}",
+            extra_warning="As fotos vinculadas também serão excluídas.",
+        )
 
 with beneficiaries_tab:
     beneficiaries = query(

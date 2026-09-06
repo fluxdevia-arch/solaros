@@ -30,6 +30,8 @@ ENTITIES: dict[str, EntityDefinition] = {
     "service_order": EntityDefinition("service_orders", "ordem de serviço"),
     "inspection": EntityDefinition("site_inspections", "vistoria"),
     "inspection_photo": EntityDefinition("inspection_photos", "foto da vistoria"),
+    "plant_equipment": EntityDefinition("plant_equipment", "equipamento da usina"),
+    "plant_equipment_photo": EntityDefinition("plant_equipment_photos", "foto do equipamento"),
     "service_contract": EntityDefinition("service_contracts", "contrato de serviço"),
     "pv_module": EntityDefinition("pv_modules", "módulo fotovoltaico"),
     "pv_inverter": EntityDefinition("pv_inverters", "inversor"),
@@ -96,16 +98,18 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
                (SELECT COUNT(*) FROM readings WHERE plant_id=?) AS readings,
                (SELECT COUNT(*) FROM beneficiaries WHERE plant_id=?) AS beneficiaries,
                (SELECT COUNT(*) FROM telemetry_daily WHERE plant_id=?) AS telemetry,
+               (SELECT COUNT(*) FROM plant_equipment WHERE plant_id=?) AS equipment,
                (SELECT COUNT(*) FROM tasks WHERE plant_id=?) AS tasks,
                (SELECT COUNT(*) FROM tickets WHERE plant_id=?) AS tickets,
                (SELECT COUNT(*) FROM service_orders WHERE plant_id=?) AS service_orders,
                (SELECT COUNT(*) FROM site_inspections WHERE plant_id=?) AS inspections,
                (SELECT COUNT(*) FROM cash_transactions WHERE plant_id=?) AS cash""",
-            (rid,) * 8,
+            (rid,) * 9,
         ) or {}
         _append_count(lines, int(summary.get("readings", 0)), "leitura mensal", "leituras mensais")
         _append_count(lines, int(summary.get("beneficiaries", 0)), "beneficiária", "beneficiárias")
         _append_count(lines, int(summary.get("telemetry", 0)), "registro diário de geração", "registros diários de geração")
+        _append_count(lines, int(summary.get("equipment", 0)), "equipamento cadastrado", "equipamentos cadastrados")
         _append_count(lines, int(summary.get("tasks", 0)), "atividade", "atividades")
         detached = sum(int(summary.get(key, 0)) for key in ("tickets", "service_orders", "inspections", "cash"))
         if detached:
@@ -138,6 +142,13 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
     elif entity == "inspection":
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM inspection_checklist_items WHERE inspection_id=?", (rid,)), "item de checklist", "itens de checklist")
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM inspection_photos WHERE inspection_id=?", (rid,)), "foto", "fotos")
+    elif entity == "plant_equipment":
+        _append_count(
+            lines,
+            _count("SELECT COUNT(*) AS value FROM plant_equipment_photos WHERE equipment_id=?", (rid,)),
+            "foto do equipamento",
+            "fotos do equipamento",
+        )
     elif entity == "opportunity":
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM proposals WHERE opportunity_id=?", (rid,)), "proposta que será preservada sem vínculo com a oportunidade", "propostas que serão preservadas sem vínculo com a oportunidade")
     elif entity in {"pv_module", "pv_inverter"}:

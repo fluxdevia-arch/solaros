@@ -6,10 +6,12 @@ import streamlit as st
 from solar_crm.calculations import contract_monthly_value, money, number_br
 from solar_crm.db import execute, query, query_df, query_one
 from solar_crm.finance import sync_invoice_to_cash
+from solar_crm.plant_equipment import ensure_equipment_inventory_schema, equipment_summary_for_client
 from solar_crm.ui import client_options, date_br, flash, page_intro, render_delete_control, show_flash, status_badge
 
 page_intro("Centralize contatos, escopo contratado, mensalidades e histórico de cobrança do pós-venda.")
 show_flash()
+ensure_equipment_inventory_schema()
 
 clients = query("SELECT * FROM clients ORDER BY CASE status WHEN 'Ativo' THEN 1 ELSE 2 END, name")
 
@@ -125,6 +127,9 @@ recurring_contract = next(
 )
 one_time_contracts = [row for row in contracts if row["billing_cycle"] == "Parcela única"]
 capacity = sum(float(plant["installed_kwp"] or 0) for plant in plants)
+equipment_summary = equipment_summary_for_client(client_id)
+total_inverters = sum(types.get("Inversor", 0) for types in equipment_summary.values())
+total_panels = sum(types.get("Painel solar", 0) for types in equipment_summary.values())
 monthly = contract_monthly_value(recurring_contract, len(plants), capacity) if recurring_contract else 0
 total_savings = query_one(
     """SELECT COALESCE(SUM(r.reference_amount-r.billed_amount),0) AS value
@@ -135,6 +140,8 @@ total_savings = query_one(
 with st.container(horizontal=True):
     st.metric("Usinas", len(plants), border=True)
     st.metric("Potência", f"{number_br(capacity, 1)} kWp", border=True)
+    st.metric("Inversores", total_inverters, border=True)
+    st.metric("Painéis", total_panels, border=True)
     st.metric("Mensalidade", money(monthly), border=True)
     st.metric("Economia acumulada", money(total_savings), border=True)
 
@@ -167,8 +174,10 @@ with profile_tab:
     st.subheader("Usinas vinculadas", icon=":material/solar_power:")
     if plants:
         plant_df = pd.DataFrame(plants).rename(columns={"name": "Usina", "unit_code": "UC", "distributor": "Distribuidora", "installed_kwp": "Potência (kWp)", "status": "Status", "next_cleaning_date": "Próxima limpeza"})
+        plant_df["Inversores"] = plant_df["id"].map(lambda value: equipment_summary.get(int(value), {}).get("Inversor", 0))
+        plant_df["Painéis"] = plant_df["id"].map(lambda value: equipment_summary.get(int(value), {}).get("Painel solar", 0))
         plant_df["Próxima limpeza"] = plant_df["Próxima limpeza"].map(date_br)
-        st.dataframe(plant_df[["Usina", "UC", "Distribuidora", "Potência (kWp)", "Status", "Próxima limpeza"]], hide_index=True, column_config={"Usina": st.column_config.TextColumn(pinned=True), "Potência (kWp)": st.column_config.NumberColumn(format="%.1f kWp")})
+        st.dataframe(plant_df[["Usina", "UC", "Distribuidora", "Potência (kWp)", "Inversores", "Painéis", "Status", "Próxima limpeza"]], hide_index=True, column_config={"Usina": st.column_config.TextColumn(pinned=True), "Potência (kWp)": st.column_config.NumberColumn(format="%.1f kWp")})
     else:
         st.caption("Nenhuma usina vinculada.")
 
