@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import date, datetime
 
 import altair as alt
@@ -13,7 +12,6 @@ from solar_crm.equipment_analysis import (
     AUTH_TYPES,
     EQUIPMENT_PROVIDERS,
     NORMALIZED_REST,
-    PHB85K_MT,
     EquipmentAnalysisError,
     analyze_string_samples,
     available_equipment_days,
@@ -21,7 +19,6 @@ from solar_crm.equipment_analysis import (
     equipment_profile,
     load_equipment_alarms,
     load_string_samples,
-    phb85k_mt_collector_config,
     sync_equipment_integration,
 )
 from solar_crm.ui import csv_download, empty_state, flash, page_intro, show_flash, status_badge
@@ -345,6 +342,10 @@ with alarms_tab:
         )
 
 with api_tab:
+    st.info(
+        "A análise usa somente APIs em nuvem. Não é necessário instalar programa, cabo ou computador na usina.",
+        icon=":material/cloud:",
+    )
     st.subheader("Fontes configuradas", icon=":material/hub:")
     if sources:
         source_df = pd.DataFrame(sources).rename(
@@ -364,9 +365,12 @@ with api_tab:
             hide_index=True,
             column_config={"Última sincronização": st.column_config.DatetimeColumn(format="DD/MM/YYYY HH:mm")},
         )
-        remote_sources = [row for row in sources if row["provider"] != PHB85K_MT]
-        if remote_sources:
-            source_map = {f"{row['name']} · {row['provider']}": int(row["id"]) for row in remote_sources}
+        synchronized_sources = [row for row in sources if row["provider"] == NORMALIZED_REST]
+        if synchronized_sources:
+            source_map = {
+                f"{row['name']} · {row['provider']}": int(row["id"])
+                for row in synchronized_sources
+            }
             with st.container(border=True):
                 st.subheader("Sincronizar equipamentos", icon=":material/sync:")
                 with st.container(horizontal=True, vertical_alignment="bottom"):
@@ -382,29 +386,6 @@ with api_tab:
                             st.rerun()
                         except EquipmentAnalysisError as exc:
                             st.error(str(exc))
-        phb_sources = [row for row in sources if row["provider"] == PHB85K_MT]
-        if phb_sources:
-            with st.container(border=True):
-                st.subheader("Instalar coletor PHB", icon=":material/cable:")
-                phb_source_map = {row["name"]: row for row in phb_sources}
-                selected_phb_name = st.selectbox("Equipamento PHB", list(phb_source_map), key="phb_collector_source")
-                selected_phb = phb_source_map[selected_phb_name]
-                configured_address = int(selected_phb.get("device_sn") or 48) if str(selected_phb.get("device_sn") or "").isdigit() else 48
-                ready_config = phb85k_mt_collector_config(
-                    modbus_address=configured_address,
-                    integration_id=int(selected_phb["id"]),
-                )
-                st.download_button(
-                    "Baixar configuração vinculada à usina",
-                    data=json.dumps(ready_config, ensure_ascii=False, indent=2),
-                    file_name=f"phb85k-mt-{configured_address:03d}-coletor.json",
-                    mime="application/json",
-                    icon=":material/download:",
-                    type="primary",
-                )
-                st.caption(
-                    "Esse arquivo já contém o identificador da fonte no Supabase. A senha do banco não é incluída."
-                )
     else:
         st.info("Nenhuma fonte de equipamento foi configurada para esta usina.", icon=":material/info:")
 
@@ -413,92 +394,51 @@ with api_tab:
         profile = equipment_profile(provider)
         if profile:
             with st.container(border=True):
-                st.subheader("Perfil reconhecido", icon=":material/memory:")
-                with st.container(horizontal=True):
-                    st.metric("Modelo", profile["model"], border=True)
-                    st.metric("Potência nominal", f"{profile['nominal_power_kw']} kW", border=True)
-                    st.metric("MPPTs", profile["mppt_count"], border=True)
-                    st.metric("Strings", profile["string_count"], border=True)
-                st.caption(
-                    f"{profile['ac_output']} · {profile['transport']} · "
-                    f"{profile['strings_per_mppt']} strings por MPPT."
+                st.subheader(f"{profile['brand']} · conexão por API", icon=":material/cloud_sync:")
+                st.table(
+                    [
+                        {"Item": "Portal", "Detalhes": profile["portal"]},
+                        {"Item": "Liberação", "Detalhes": profile["access"]},
+                        {"Item": "Dados esperados", "Detalhes": profile["scope"]},
+                        {"Item": "Detalhamento de strings", "Detalhes": profile["string_scope"]},
+                    ],
+                    border="horizontal",
                 )
                 st.link_button(
-                    "Abrir manual oficial PHB",
+                    "Abrir portal ou documentação oficial",
                     profile["documentation_url"],
                     icon=":material/menu_book:",
                 )
-        if provider == PHB85K_MT:
-            st.info(
-                "O SolarOS Cloud recebe os dados por HTTPS. No local da usina, conecte um coletor ao RS485 "
-                "do inversor e mantenha o Modbus somente para leitura.",
-                icon=":material/cable:",
-            )
-            modbus_address = st.number_input(
-                "Endereço Modbus do PHB",
-                min_value=1,
-                max_value=247,
-                value=48,
-                step=1,
-                help="Foi preenchido como 48 a partir da identificação 048 informada. Confirme no InvApp/inversor.",
-            )
-            collector_config = phb85k_mt_collector_config(modbus_address=int(modbus_address))
-            st.download_button(
-                "Baixar configuração do coletor PHB",
-                data=json.dumps(collector_config, ensure_ascii=False, indent=2),
-                file_name="phb85k-mt-048-coletor.json",
-                mime="application/json",
-                icon=":material/download:",
-            )
+        if provider != NORMALIZED_REST:
             st.warning(
-                "Este é um modelo ainda não vinculado à usina. Depois de salvar a fonte, baixe a configuração "
-                "vinculada na seção Instalar coletor PHB. A PHB não publica a tabela de registradores nem todos "
-                "os parâmetros seriais. O coletor não fará leituras até esses dados serem confirmados no mapa "
-                "oficial do modelo.",
-                icon=":material/warning:",
-            )
-        elif provider != NORMALIZED_REST:
-            st.warning(
-                "Esse fabricante exige um adaptador específico para converter os campos proprietários. "
-                "Você pode salvar a configuração agora, mas a sincronização ficará pendente até o adaptador ser ativado.",
+                "Cadastre somente credenciais oficiais destinadas a integração. A sincronização será liberada "
+                "quando o fabricante autorizar a conta e fornecer os endpoints do seu contrato. A disponibilidade "
+                "de dados por string varia por marca e modelo.",
                 icon=":material/info:",
             )
         with st.form("new_equipment_integration"):
             name = st.text_input(
                 "Nome da fonte",
-                value="PHB85K-MT · 048" if provider == PHB85K_MT else "",
                 placeholder="Ex.: Inversor 1 · telhado norte",
             )
-            device_sn = st.text_input(
-                "Endereço Modbus ou número de série",
-                value="048" if provider == PHB85K_MT else "",
+            device_sn = st.text_input("Número de série / ID do inversor ou datalogger")
+            base_url = st.text_input("Endereço-base HTTPS", placeholder="https://api.fabricante.com")
+            auth_type = st.selectbox("Autenticação", AUTH_TYPES)
+            api_key = st.text_input(
+                "Usuário, client ID ou nome do cabeçalho",
+                help="No modo API key, use por exemplo X-API-Key. No Basic Auth, informe o usuário.",
             )
-            if provider == PHB85K_MT:
-                base_url = "https://collector.local"
-                auth_type = "Sem autenticação"
-                api_key = ""
-                api_secret = ""
-                strings_path = "/equipment/{device_sn}/strings?date={date}"
-                alarms_path = "/equipment/{device_sn}/alarms?date={date}"
-                st.caption("O coletor grava diretamente no Supabase; não é necessário informar uma URL de API.")
-            else:
-                base_url = st.text_input("Endereço-base HTTPS", placeholder="https://api.fabricante.com")
-                auth_type = st.selectbox("Autenticação", AUTH_TYPES)
-                api_key = st.text_input(
-                    "Usuário ou nome do cabeçalho",
-                    help="No modo API key, use por exemplo X-API-Key. No Basic Auth, informe o usuário.",
-                )
-                api_secret = st.text_input("Token, senha ou segredo", type="password")
-                strings_path = st.text_input(
-                    "Endpoint de strings",
-                    value="/equipment/{device_sn}/strings?date={date}",
-                    help="Marcadores aceitos: {device_sn} e {date}.",
-                )
-                alarms_path = st.text_input(
-                    "Endpoint de alarmes",
-                    value="/equipment/{device_sn}/alarms?date={date}",
-                    help="Marcadores aceitos: {device_sn} e {date}.",
-                )
+            api_secret = st.text_input("Token, senha ou client secret", type="password")
+            strings_path = st.text_input(
+                "Endpoint de strings ou MPPTs",
+                value="/equipment/{device_sn}/strings?date={date}",
+                help="Use o caminho fornecido pela documentação da API. Marcadores: {device_sn} e {date}.",
+            )
+            alarms_path = st.text_input(
+                "Endpoint de alarmes",
+                value="/equipment/{device_sn}/alarms?date={date}",
+                help="Use o caminho fornecido pela documentação da API. Marcadores: {device_sn} e {date}.",
+            )
             if st.form_submit_button("Salvar fonte protegida", type="primary", icon=":material/lock:"):
                 try:
                     create_equipment_integration(

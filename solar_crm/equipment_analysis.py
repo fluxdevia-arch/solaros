@@ -13,35 +13,104 @@ from solar_crm.secure_store import protect_secret, unprotect_secret
 
 
 NORMALIZED_REST = "REST normalizada"
-PHB85K_MT = "PHB PHB85K-MT · RS485/Modbus RTU"
+FRONIUS_CLOUD = "Fronius Solar.web Query API"
+SOLPLANET_CLOUD = "Solplanet Cloud"
+NANSEN_CLOUD = "Nansen Solar Cloud"
+SAJ_CLOUD = "SAJ eSolar / Elekeeper"
+DEYE_CLOUD = "Deye Cloud"
+WEG_CLOUD = "WEG Solar Portal"
+HUAWEI_CLOUD = "Huawei FusionSolar"
+GROWATT_CLOUD = "Growatt OpenAPI"
+PHB_CLOUD = "PHB Solar Portal"
 EQUIPMENT_PROVIDERS = [
     NORMALIZED_REST,
-    PHB85K_MT,
-    "Huawei FusionSolar",
-    "Growatt OpenAPI",
+    FRONIUS_CLOUD,
+    SOLPLANET_CLOUD,
+    NANSEN_CLOUD,
+    SAJ_CLOUD,
+    DEYE_CLOUD,
+    WEG_CLOUD,
+    HUAWEI_CLOUD,
+    GROWATT_CLOUD,
+    PHB_CLOUD,
     "SolisCloud",
-    "Deye Cloud",
     "Sungrow iSolarCloud",
 ]
 AUTH_TYPES = ["Bearer token", "Basic Auth", "API key no cabeçalho", "Sem autenticação"]
 
 EQUIPMENT_PROFILES: dict[str, dict[str, Any]] = {
-    PHB85K_MT: {
-        "manufacturer": "PHB",
-        "model": "PHB85K-MT",
-        "nominal_power_kw": 85,
-        "ac_output": "Trifásico 380/220 V",
-        "mppt_count": 4,
-        "strings_per_mppt": 4,
-        "string_count": 16,
-        "transport": "RS485 / Modbus RTU",
-        "logger": "PHBLOGGER Pro ou coletor SolarOS local",
-        "maximum_bus_distance_m": 1000,
-        "documentation_url": (
-            "https://www.energiasolarphb.com.br/wp-content/uploads/2022/04/"
-            "Manual-do-Usuario-MT-35K_60K_75K_50K_85K-v1.1.pdf"
-        ),
-    }
+    FRONIUS_CLOUD: {
+        "brand": "Fronius",
+        "portal": "Solar.web",
+        "access": "API oficial documentada; contrato e chave para dados reais",
+        "scope": "Usinas, dispositivos, histórico, canais e mensagens de serviço",
+        "string_scope": "Depende dos canais disponibilizados pelo equipamento",
+        "documentation_url": "https://www.fronius.com/en/solar-energy/solar-solutions/energy-management/solarweb-query-api",
+    },
+    SOLPLANET_CLOUD: {
+        "brand": "Solplanet",
+        "portal": "Solplanet Cloud",
+        "access": "Solicitar credencial de integração ao suporte Solplanet",
+        "scope": "Produção, inversores, MPPTs e alarmes conforme a conta",
+        "string_scope": "Depende do modelo, logger e permissão da API",
+        "documentation_url": "https://solplanet.net/pt-br/pagina-para-instaladores",
+    },
+    NANSEN_CLOUD: {
+        "brand": "Nansen",
+        "portal": "Nansen Solar",
+        "access": "Solicitar API empresarial e liberação das usinas",
+        "scope": "Estado, geração, eficiência, alarmes e diagnóstico disponível no portal",
+        "string_scope": "Depende do modelo e da função de monitoramento de séries",
+        "documentation_url": "https://www.nansensolar.com.br/service-monitoring.html",
+    },
+    SAJ_CLOUD: {
+        "brand": "SAJ",
+        "portal": "eSolar / Elekeeper",
+        "access": "Solicitar acesso Open Platform para a conta do integrador",
+        "scope": "Plantas, dispositivos, energia, estado e alarmes",
+        "string_scope": "Depende do inversor e dos campos liberados pela plataforma",
+        "documentation_url": "https://fdownload.saj-electric.com/download/index.html",
+    },
+    DEYE_CLOUD: {
+        "brand": "Deye",
+        "portal": "Deye Cloud",
+        "access": "Solicitar API/parceria e vinculação das plantas",
+        "scope": "Dispositivos, produção, estado e alarmes conforme o acesso",
+        "string_scope": "Pode ficar limitado a MPPT em alguns modelos",
+        "documentation_url": "https://www.deyeinverter.com/product/accessory-monitoring-1/Wireless-energy-management-system-2960.html",
+    },
+    WEG_CLOUD: {
+        "brand": "WEG",
+        "portal": "WEG Solar Portal",
+        "access": "Solicitar chave e segredo da API ao suporte/portal WEG",
+        "scope": "Usinas, inversores, produção e eventos conforme o produto",
+        "string_scope": "Depende do modelo SIW e da telemetria publicada",
+        "documentation_url": "https://www.weg.net/",
+    },
+    HUAWEI_CLOUD: {
+        "brand": "Huawei",
+        "portal": "FusionSolar SmartPVMS",
+        "access": "Criar usuário Northbound API na conta empresarial",
+        "scope": "Usinas, dispositivos, dados em tempo real, histórico e alarmes",
+        "string_scope": "Disponível quando o equipamento e a conta publicam esses canais",
+        "documentation_url": "https://info.support.huawei.com/enterprise/en/doc/EDOC1100307213/9e1a18d2/login-interface",
+    },
+    GROWATT_CLOUD: {
+        "brand": "Growatt",
+        "portal": "ShineServer / OpenAPI",
+        "access": "Solicitar conta e credenciais OpenAPI",
+        "scope": "Plantas, dataloggers, inversores, energia, estado e falhas",
+        "string_scope": "Depende da família do inversor e do endpoint autorizado",
+        "documentation_url": "https://openapi.growatt.com/",
+    },
+    PHB_CLOUD: {
+        "brand": "PHB",
+        "portal": "PHB Solar Portal",
+        "access": "Solicitar API do portal ou integração homologada à PHB",
+        "scope": "PHB85K-MT e demais inversores vinculados ao portal",
+        "string_scope": "As 16 strings só aparecerão se a API publicar corrente individual",
+        "documentation_url": "https://www.energiasolarphb.com.br/tutoriais/",
+    },
 }
 
 
@@ -80,68 +149,6 @@ def equipment_profile(provider: str) -> dict[str, Any] | None:
     """Return a copy so callers cannot mutate the registered equipment profile."""
     profile = EQUIPMENT_PROFILES.get(provider)
     return dict(profile) if profile else None
-
-
-def phb85k_mt_collector_config(
-    *,
-    modbus_address: int = 48,
-    integration_id: int | None = None,
-) -> dict[str, Any]:
-    """Build the safe, read-only handoff used by the on-site PHB collector.
-
-    PHB's public user manual confirms Modbus RTU but does not publish the
-    register table or serial framing. Those values therefore remain explicit
-    commissioning checks instead of unsafe guessed defaults.
-    """
-    if not 1 <= int(modbus_address) <= 247:
-        raise EquipmentAnalysisError("O endereço Modbus deve ficar entre 1 e 247.")
-    string_registers = []
-    for string_number in range(1, 17):
-        mppt_number = ((string_number - 1) // 4) + 1
-        string_registers.append(
-            {
-                "string_name": f"S{string_number}",
-                "mppt": f"MPPT {mppt_number}",
-                "current_a": {
-                    "address": None,
-                    "table": "input",
-                    "data_type": "uint16",
-                    "scale": None,
-                },
-                "voltage_v": {
-                    "address": None,
-                    "table": "input",
-                    "data_type": "uint16",
-                    "scale": None,
-                },
-            }
-        )
-    return {
-        "manufacturer": "PHB",
-        "model": "PHB85K-MT",
-        "device_name": "PHB85K-MT · 048",
-        "integration_id": integration_id,
-        "collector_mode": "read_only",
-        "transport": "modbus_rtu",
-        "serial_port": "COM3 ou /dev/ttyUSB0",
-        "modbus_address": int(modbus_address),
-        "baudrate": "CONFIRMAR_NO_INVERSOR",
-        "parity": "CONFIRMAR_NO_INVERSOR",
-        "stop_bits": "CONFIRMAR_NO_INVERSOR",
-        "database_url_env": "SOLAROS_DATABASE_URL",
-        "offline_queue": "solaros-collector-queue.db",
-        "poll_interval_seconds": 60,
-        "topology": {
-            "mppt_count": 4,
-            "strings_per_mppt": 4,
-            "string_count": 16,
-        },
-        "registers": {
-            "status": "AGUARDANDO_MAPA_OFICIAL_PHB",
-            "strings": string_registers,
-            "alarms": [],
-        },
-    }
 
 
 def _validated_base_url(value: str) -> str:
@@ -262,7 +269,7 @@ def sync_equipment_integration(
     source = query_one("SELECT * FROM equipment_integrations WHERE id=?", (int(integration_id),))
     if not source:
         raise EquipmentAnalysisError("Fonte de equipamentos não encontrada.")
-    if source["provider"] not in {NORMALIZED_REST, PHB85K_MT}:
+    if source["provider"] != NORMALIZED_REST:
         raise EquipmentAnalysisError(
             "Este fabricante exige um adaptador próprio. Use REST normalizada por meio do gateway do "
             "fabricante ou solicite a ativação do conector específico."

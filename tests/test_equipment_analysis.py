@@ -6,13 +6,20 @@ from pathlib import Path
 
 from solar_crm.db import execute, init_db, query
 from solar_crm.equipment_analysis import (
+    DEYE_CLOUD,
+    EQUIPMENT_PROVIDERS,
+    FRONIUS_CLOUD,
+    GROWATT_CLOUD,
+    HUAWEI_CLOUD,
+    NANSEN_CLOUD,
     NORMALIZED_REST,
-    PHB85K_MT,
-    EquipmentAnalysisError,
+    PHB_CLOUD,
+    SAJ_CLOUD,
+    SOLPLANET_CLOUD,
+    WEG_CLOUD,
     analyze_string_samples,
     create_equipment_integration,
     equipment_profile,
-    phb85k_mt_collector_config,
     sync_equipment_integration,
 )
 
@@ -40,19 +47,33 @@ def _samples(factors: dict[str, list[float]]) -> list[dict]:
 
 
 class EquipmentDiagnosticTests(unittest.TestCase):
-    def test_phb85k_profile_and_collector_are_read_only(self):
-        profile = equipment_profile(PHB85K_MT)
-        config = phb85k_mt_collector_config(modbus_address=48)
+    def test_requested_cloud_providers_have_profiles(self):
+        providers = (
+            FRONIUS_CLOUD,
+            SOLPLANET_CLOUD,
+            NANSEN_CLOUD,
+            SAJ_CLOUD,
+            DEYE_CLOUD,
+            WEG_CLOUD,
+            HUAWEI_CLOUD,
+            GROWATT_CLOUD,
+            PHB_CLOUD,
+        )
 
-        self.assertEqual(profile["mppt_count"], 4)
-        self.assertEqual(profile["string_count"], 16)
-        self.assertEqual(config["modbus_address"], 48)
-        self.assertEqual(config["collector_mode"], "read_only")
-        self.assertEqual(config["registers"]["status"], "AGUARDANDO_MAPA_OFICIAL_PHB")
+        for provider in providers:
+            with self.subTest(provider=provider):
+                self.assertIn(provider, EQUIPMENT_PROVIDERS)
+                profile = equipment_profile(provider)
+                self.assertIsNotNone(profile)
+                self.assertTrue(profile["portal"])
+                self.assertTrue(profile["access"])
+                self.assertTrue(profile["documentation_url"].startswith("https://"))
 
-    def test_phb85k_collector_rejects_invalid_modbus_address(self):
-        with self.assertRaises(EquipmentAnalysisError):
-            phb85k_mt_collector_config(modbus_address=0)
+    def test_equipment_profile_returns_a_copy(self):
+        profile = equipment_profile(PHB_CLOUD)
+        profile["portal"] = "alterado"
+
+        self.assertEqual(equipment_profile(PHB_CLOUD)["portal"], "PHB Solar Portal")
 
     def test_constant_deficit_is_classified_as_electrical(self):
         rows = _samples({"S1": [1, 1, 1, 1], "S2": [1, 1, 1, 1], "S3": [0.6, 0.6, 0.6, 0.6]})
@@ -177,30 +198,6 @@ class EquipmentIntegrationTests(unittest.TestCase):
         self.assertEqual(len(query("SELECT * FROM equipment_string_samples")), 1)
         self.assertEqual(len(query("SELECT * FROM equipment_alarms")), 1)
         self.assertIn("INV-123", session.calls[0][0])
-
-    def test_phb_gateway_uses_the_normalized_collector_contract(self):
-        source_id = create_equipment_integration(
-            plant_id=self.plant_id,
-            name="PHB85K-MT · 048",
-            provider=PHB85K_MT,
-            base_url="https://gateway.example.com",
-            auth_type="Sem autenticação",
-            credential_key="",
-            credential_secret="",
-            device_sn="048",
-            strings_path="/equipment/{device_sn}/strings?date={date}",
-            alarms_path="/equipment/{device_sn}/alarms?date={date}",
-        )
-
-        result = sync_equipment_integration(
-            source_id,
-            date(2026, 9, 6),
-            session=_EquipmentSession(),
-        )
-
-        self.assertEqual(result.string_samples, 1)
-        self.assertEqual(result.alarms, 1)
-
 
 if __name__ == "__main__":
     unittest.main()
