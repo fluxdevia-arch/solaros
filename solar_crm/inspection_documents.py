@@ -140,7 +140,7 @@ def generate_inspection_pdf(inspection_id: int, save_path: str | Path | None = N
     story.append(_info_table([
         ["TENSÃO CC", _measurement(inspection.get("dc_voltage_v"), "V"), "CORRENTE CC", _measurement(inspection.get("dc_current_a"), "A")],
         ["TENSÃO CA", _measurement(inspection.get("ac_voltage_v"), "V"), "CORRENTE CA", _measurement(inspection.get("ac_current_a"), "A")],
-        ["ISOLAÇÃO", _measurement(inspection.get("insulation_mohm"), "MΩ"), "ATERRAMENTO", _measurement(inspection.get("grounding_ohm"), "Ω")],
+        ["ISOLAÇÃO", _measurement(inspection.get("insulation_mohm"), "MOhm"), "ATERRAMENTO", _measurement(inspection.get("grounding_ohm"), "Ohm")],
         ["POTÊNCIA NO ATO", _measurement(inspection.get("generation_power_kw"), "kW"), "ALARME", inspection.get("inverter_alarms")],
     ], styles, [2.55 * cm, 6.1 * cm, 2.55 * cm, 6.1 * cm]))
 
@@ -170,6 +170,7 @@ def generate_inspection_pdf(inspection_id: int, save_path: str | Path | None = N
     checklist = Table(checklist_data, colWidths=[3.1 * cm, 6.4 * cm, 2.65 * cm, 5.05 * cm], repeatRows=1)
     checklist.setStyle(TableStyle(checklist_style))
     story.append(checklist)
+    story += [PageBreak(), Paragraph("Diagnóstico e encaminhamento", styles["DocTitle"])]
 
     for title, field in [
         ("Riscos e condições de segurança", "safety_risks"),
@@ -181,6 +182,19 @@ def generate_inspection_pdf(inspection_id: int, save_path: str | Path | None = N
         story += _text_block(title, inspection.get(field), styles)
     if inspection.get("follow_up_date"):
         story.append(Paragraph(f"Retorno recomendado para: <b>{date_br(inspection['follow_up_date'])}</b>", styles["DocBody"]))
+
+    story += [
+        Spacer(1, 0.45 * cm),
+        Paragraph("Ciência e encerramento", styles["DocSection"]),
+        Paragraph(_safe(inspection.get("client_acknowledgement") or "O responsável foi informado sobre as condições encontradas e as recomendações registradas neste relatório."), styles["DocBody"]),
+        Spacer(1, 0.55 * cm),
+        KeepTogether([_technical_signature(company, styles)]),
+        Spacer(1, 0.35 * cm),
+        Paragraph(
+            "Relatório baseado em inspeção visual, medições registradas e evidências coletadas no local. Intervenções elétricas devem observar os procedimentos de segurança e as normas aplicáveis.",
+            styles["DocSmall"],
+        ),
+    ]
 
     if photos:
         story += [PageBreak(), Paragraph("Registro fotográfico", styles["DocTitle"])]
@@ -198,19 +212,6 @@ def generate_inspection_pdf(inspection_id: int, save_path: str | Path | None = N
             ("BOTTOMPADDING", (0, 0), (-1, -1), 0.12 * cm),
         ]))
         story.append(gallery)
-
-    story += [
-        Spacer(1, 0.45 * cm),
-        Paragraph("Ciência e encerramento", styles["DocSection"]),
-        Paragraph(_safe(inspection.get("client_acknowledgement") or "O responsável foi informado sobre as condições encontradas e as recomendações registradas neste relatório."), styles["DocBody"]),
-        Spacer(1, 0.55 * cm),
-        KeepTogether([_technical_signature(company, styles)]),
-        Spacer(1, 0.35 * cm),
-        Paragraph(
-            "Relatório baseado em inspeção visual, medições registradas e evidências coletadas no local. Intervenções elétricas devem observar os procedimentos de segurança e as normas aplicáveis.",
-            styles["DocSmall"],
-        ),
-    ]
     doc.build(
         story,
         onFirstPage=lambda canvas, document: _footer(canvas, document, company, inspection["number"]),

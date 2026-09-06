@@ -80,6 +80,104 @@ def _show_saved_photos(inspection_id: int) -> None:
                 )
 
 
+def _advance_photo_capture(inspection_id: int) -> None:
+    cycle_key = f"inspection_photo_cycle_{inspection_id}"
+    st.session_state[cycle_key] = int(st.session_state.get(cycle_key, 0)) + 1
+
+
+def _render_photo_capture(inspection_id: int) -> None:
+    cycle_key = f"inspection_photo_cycle_{inspection_id}"
+    gallery_cycle_key = f"inspection_gallery_cycle_{inspection_id}"
+    notice_key = f"inspection_photo_notice_{inspection_id}"
+    cycle = int(st.session_state.get(cycle_key, 0))
+    gallery_cycle = int(st.session_state.get(gallery_cycle_key, 0))
+
+    with st.expander("6. Fotos e evidências", expanded=True, icon=":material/photo_camera:"):
+        notice = st.session_state.pop(notice_key, None)
+        if notice:
+            st.success(notice, icon=":material/check_circle:")
+
+        st.caption(
+            "Escolha a categoria, tire a foto e salve. Ao trocar a categoria ou salvar, "
+            "a câmera é liberada automaticamente para a próxima imagem."
+        )
+        photo_category = st.selectbox(
+            "Categoria da foto tirada agora",
+            PHOTO_CATEGORIES,
+            key=f"inspection_photo_category_{inspection_id}",
+            on_change=_advance_photo_capture,
+            args=(inspection_id,),
+        )
+        category_index = PHOTO_CATEGORIES.index(photo_category)
+        camera_photo = st.camera_input(
+            "Tirar foto no local",
+            resolution="1080p",
+            width="stretch",
+            key=f"inspection_camera_{inspection_id}_{category_index}_{cycle}",
+        )
+        camera_caption = st.text_input(
+            "Legenda da foto",
+            placeholder="Ex.: Conector MC4 da string 3 com aquecimento",
+            key=f"inspection_camera_caption_{inspection_id}_{category_index}_{cycle}",
+        )
+        if st.button(
+            "Salvar foto e tirar outra",
+            type="primary",
+            icon=":material/add_a_photo:",
+            width="stretch",
+            disabled=camera_photo is None,
+            key=f"inspection_save_camera_{inspection_id}_{category_index}_{cycle}",
+        ):
+            try:
+                add_inspection_photo(
+                    inspection_id,
+                    camera_photo.getvalue(),
+                    camera_photo.name,
+                    photo_category,
+                    camera_caption,
+                )
+                st.session_state[notice_key] = f"Foto de {photo_category} salva. A câmera está pronta para a próxima foto."
+                _advance_photo_capture(inspection_id)
+                st.rerun()
+            except (ValueError, OSError) as exc:
+                st.error(str(exc), icon=":material/error:")
+
+        st.divider()
+        uploaded_photos = st.file_uploader(
+            "Adicionar fotos da galeria",
+            type=["jpg", "jpeg", "png", "webp"],
+            accept_multiple_files=True,
+            max_upload_size=12,
+            key=f"inspection_gallery_{inspection_id}_{gallery_cycle}",
+        )
+        if st.button(
+            "Salvar fotos da galeria",
+            icon=":material/upload:",
+            width="stretch",
+            disabled=not uploaded_photos,
+            key=f"inspection_save_gallery_{inspection_id}_{gallery_cycle}",
+        ):
+            try:
+                current_total = len(inspection_photos(inspection_id))
+                if current_total + len(uploaded_photos) > 20:
+                    raise ValueError(f"A vistoria aceita até 20 fotos. Há {20 - current_total} espaço(s) disponível(is).")
+                for uploaded in uploaded_photos:
+                    add_inspection_photo(
+                        inspection_id,
+                        uploaded.getvalue(),
+                        uploaded.name,
+                        photo_category,
+                        uploaded.name,
+                    )
+                st.session_state[notice_key] = f"{len(uploaded_photos)} foto(s) da galeria salva(s) em {photo_category}."
+                st.session_state[gallery_cycle_key] = gallery_cycle + 1
+                st.rerun()
+            except (ValueError, OSError) as exc:
+                st.error(str(exc), icon=":material/error:")
+
+        st.caption("O SolarOS reduz as imagens antes de armazenar. Limite de 20 fotos por vistoria.")
+
+
 def _render_field_form(inspection: dict) -> None:
     items = inspection_items(inspection["id"])
     grouped: dict[str, list[dict]] = defaultdict(list)
@@ -164,19 +262,7 @@ def _render_field_form(inspection: dict) -> None:
             acknowledgement = st.text_area("Ciência do responsável do cliente", value=inspection.get("client_acknowledgement") or "", height=90, placeholder="Ex.: Cliente informado sobre o desligamento necessário e orçamento complementar.")
             status = st.selectbox("Status final da vistoria", INSPECTION_STATUSES, index=_select_index(INSPECTION_STATUSES, inspection.get("status"), 1))
 
-        with st.expander("6. Fotos e evidências", expanded=True, icon=":material/photo_camera:"):
-            photo_category = st.selectbox("Categoria da foto tirada agora", PHOTO_CATEGORIES)
-            camera_photo = st.camera_input("Tirar foto no local", resolution="1080p", width="stretch")
-            camera_caption = st.text_input("Legenda da foto", placeholder="Ex.: Conector MC4 da string 3 com aquecimento")
-            uploaded_photos = st.file_uploader(
-                "Adicionar outras fotos da galeria",
-                type=["jpg", "jpeg", "png", "webp"],
-                accept_multiple_files=True,
-                max_upload_size=12,
-            )
-            st.caption("O SolarOS reduz as imagens antes de armazenar. Limite de 20 fotos por vistoria.")
-
-        submitted = st.form_submit_button("Salvar vistoria e evidências", type="primary", icon=":material/save:", width="stretch")
+        submitted = st.form_submit_button("Salvar dados da vistoria", type="primary", icon=":material/save:", width="stretch")
         if submitted:
             try:
                 update_inspection(inspection["id"], {
@@ -216,14 +302,12 @@ def _render_field_form(inspection: dict) -> None:
                     "follow_up_date": follow_up.isoformat() if needs_return else None,
                     "client_acknowledgement": acknowledgement,
                 }, checklist_values)
-                if camera_photo:
-                    add_inspection_photo(inspection["id"], camera_photo.getvalue(), camera_photo.name, photo_category, camera_caption)
-                for uploaded in uploaded_photos or []:
-                    add_inspection_photo(inspection["id"], uploaded.getvalue(), uploaded.name, "Outras evidências", uploaded.name)
                 st.success("Vistoria salva com sucesso.", icon=":material/check_circle:")
                 st.rerun()
             except (ValueError, OSError) as exc:
                 st.error(str(exc), icon=":material/error:")
+
+    _render_photo_capture(inspection["id"])
 
 
 token = str(st.query_params.get("inspection") or "").strip()
