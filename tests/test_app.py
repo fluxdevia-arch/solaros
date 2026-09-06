@@ -316,6 +316,22 @@ class StreamlitSmokeTest(unittest.TestCase):
         self.assertTrue(any(title.value == "Vistoria técnica" for title in app.title))
         self.assertGreaterEqual(len(app.selectbox), 25)
 
+    def test_hybrid_sizing_form_calculates_complete_system(self):
+        app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        app = AppTest.from_file(app_path, default_timeout=20).run()
+        app.switch_page("app_pages/sizing.py").run()
+        self.assertFalse(app.exception)
+
+        app.text_input(key="special_energy_name").set_value("Residência híbrida teste")
+        app.button(key="special_energy_calculate").click().run()
+
+        self.assertFalse(app.exception)
+        complete = app.session_state["special_sizing_result"]
+        self.assertEqual(complete["result"]["system_type"], "Híbrido conectado")
+        self.assertGreater(complete["result"]["module_count"], 0)
+        self.assertGreater(complete["result"]["battery_units"], 0)
+        self.assertGreater(len(complete["result"]["components"]), 8)
+
 
 if __name__ == "__main__":
     unittest.main()

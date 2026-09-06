@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -621,6 +621,21 @@ CREATE TABLE IF NOT EXISTS sizing_projects (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS special_sizing_projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    number TEXT UNIQUE,
+    client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    address TEXT,
+    system_type TEXT NOT NULL,
+    input_json TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Rascunho',
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS proposals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     number TEXT UNIQUE,
@@ -658,6 +673,7 @@ CREATE INDEX IF NOT EXISTS idx_opportunities_stage ON opportunities(stage, next_
 CREATE INDEX IF NOT EXISTS idx_service_orders_status ON service_orders(status, scheduled_date);
 CREATE INDEX IF NOT EXISTS idx_service_orders_token ON service_orders(public_token);
 CREATE INDEX IF NOT EXISTS idx_site_inspections_status ON site_inspections(status, inspected_at);
+CREATE INDEX IF NOT EXISTS idx_special_sizing_client ON special_sizing_projects(client_id, system_type);
 CREATE INDEX IF NOT EXISTS idx_site_inspections_token ON site_inspections(public_token);
 CREATE INDEX IF NOT EXISTS idx_inspection_items_inspection ON inspection_checklist_items(inspection_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_inspection_photos_inspection ON inspection_photos(inspection_id, created_at);
@@ -1181,6 +1197,7 @@ def clear_business_data() -> None:
     """Remove demo/operational records while preserving company settings."""
     conn = connect()
     try:
+        conn.execute("DELETE FROM special_sizing_projects")
         conn.execute("DELETE FROM sizing_projects")
         conn.execute("DELETE FROM pv_modules")
         conn.execute("DELETE FROM pv_inverters")

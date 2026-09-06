@@ -34,6 +34,7 @@ ENTITIES: dict[str, EntityDefinition] = {
     "pv_module": EntityDefinition("pv_modules", "módulo fotovoltaico"),
     "pv_inverter": EntityDefinition("pv_inverters", "inversor"),
     "sizing_project": EntityDefinition("sizing_projects", "projeto de dimensionamento"),
+    "special_sizing_project": EntityDefinition("special_sizing_projects", "projeto de sistema especial"),
     "proposal": EntityDefinition("proposals", "proposta/orçamento"),
 }
 
@@ -69,8 +70,9 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
                (SELECT COUNT(*) FROM tasks WHERE client_id=?) AS tasks,
                (SELECT COUNT(*) FROM tickets WHERE client_id=?) AS tickets,
                (SELECT COUNT(*) FROM opportunities WHERE client_id=?) AS opportunities,
-               (SELECT COUNT(*) FROM sizing_projects WHERE client_id=?) AS sizing_projects""",
-            (rid,) * 11,
+               (SELECT COUNT(*) FROM sizing_projects WHERE client_id=?) AS sizing_projects,
+               (SELECT COUNT(*) FROM special_sizing_projects WHERE client_id=?) AS special_sizing_projects""",
+            (rid,) * 12,
         ) or {}
         _append_count(lines, int(summary.get("plants", 0)), "usina vinculada", "usinas vinculadas")
         _append_count(lines, int(summary.get("contracts", 0)), "contrato de pós-venda", "contratos de pós-venda")
@@ -81,7 +83,11 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
         _append_count(lines, int(summary.get("proposals", 0)), "proposta", "propostas")
         _append_count(lines, int(summary.get("tasks", 0)), "atividade", "atividades")
         _append_count(lines, int(summary.get("tickets", 0)), "ocorrência", "ocorrências")
-        detached = int(summary.get("opportunities", 0)) + int(summary.get("sizing_projects", 0))
+        detached = (
+            int(summary.get("opportunities", 0))
+            + int(summary.get("sizing_projects", 0))
+            + int(summary.get("special_sizing_projects", 0))
+        )
         if detached:
             lines.append(f"{detached} registro(s) comercial/técnico(s) serão preservados sem vínculo com o cliente")
     elif entity == "plant":

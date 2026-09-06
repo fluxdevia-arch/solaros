@@ -116,6 +116,32 @@ def create_sizing_project(
     return project_id
 
 
+def create_special_sizing_project(values: dict, result: dict) -> int:
+    name = str(values.get("name") or "").strip()
+    system_type = str(result.get("system_type") or values.get("system_type") or "").strip()
+    if not name or not system_type:
+        raise ValueError("Informe o nome e a modalidade do projeto.")
+    project_id = execute(
+        """INSERT INTO special_sizing_projects
+           (client_id, name, address, system_type, input_json, result_json,
+            status, notes, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            values.get("client_id"),
+            name,
+            values.get("address"),
+            system_type,
+            json.dumps(values, ensure_ascii=False),
+            json.dumps(result, ensure_ascii=False),
+            values.get("status") or "Rascunho",
+            str(values.get("notes") or "").strip(),
+            now_iso(),
+        ),
+    )
+    execute("UPDATE special_sizing_projects SET number=? WHERE id=?", (f"ESP-{datetime.now():%Y}-{project_id:05d}", project_id))
+    return project_id
+
+
 def create_proposal(values: dict) -> int:
     title = str(values.get("title") or "").strip()
     scope = str(values.get("scope") or "").strip()
