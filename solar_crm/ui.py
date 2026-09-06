@@ -53,6 +53,7 @@ def status_badge(status: str) -> str:
         "Em atendimento": "blue", "Atenção": "orange", "Atrasada": "red",
         "Crítica": "red", "Alta": "orange", "Inativo": "gray", "Desativada": "gray",
         "Cancelada": "gray", "Aberto": "red",
+        "Saudável": "green", "Degradada": "orange",
     }.get(status, "gray")
     return f":{color}-badge[{status}]"
 

@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -334,6 +334,57 @@ CREATE TABLE IF NOT EXISTS integration_sync_logs (
     records_received INTEGER NOT NULL DEFAULT 0,
     generation_kwh REAL NOT NULL DEFAULT 0,
     message TEXT
+);
+
+CREATE TABLE IF NOT EXISTS equipment_integrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plant_id INTEGER NOT NULL REFERENCES plants(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    base_url TEXT NOT NULL,
+    auth_type TEXT NOT NULL DEFAULT 'Bearer token',
+    credential_key_encrypted TEXT,
+    credential_secret_encrypted TEXT,
+    credential_hint TEXT,
+    device_sn TEXT,
+    strings_path TEXT NOT NULL,
+    alarms_path TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Configurada',
+    last_sync_at TEXT,
+    last_sync_status TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(plant_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS equipment_string_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    integration_id INTEGER NOT NULL REFERENCES equipment_integrations(id) ON DELETE CASCADE,
+    sample_at TEXT NOT NULL,
+    inverter_name TEXT NOT NULL,
+    mppt TEXT NOT NULL,
+    string_name TEXT NOT NULL,
+    current_a REAL NOT NULL DEFAULT 0,
+    voltage_v REAL NOT NULL DEFAULT 0,
+    power_kw REAL NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'API',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(integration_id, sample_at, inverter_name, mppt, string_name)
+);
+
+CREATE TABLE IF NOT EXISTS equipment_alarms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    integration_id INTEGER NOT NULL REFERENCES equipment_integrations(id) ON DELETE CASCADE,
+    external_id TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    code TEXT,
+    severity TEXT NOT NULL DEFAULT 'Atenção',
+    title TEXT NOT NULL,
+    message TEXT,
+    status TEXT NOT NULL DEFAULT 'Aberto',
+    resolved_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(integration_id, external_id)
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -665,6 +716,9 @@ CREATE INDEX IF NOT EXISTS idx_remote_plants_integration ON remote_plants(integr
 CREATE INDEX IF NOT EXISTS idx_plant_integrations_integration ON plant_integrations(integration_id, status);
 CREATE INDEX IF NOT EXISTS idx_telemetry_daily_plant_date ON telemetry_daily(plant_id, reading_date);
 CREATE INDEX IF NOT EXISTS idx_integration_sync_logs_started ON integration_sync_logs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_equipment_integrations_plant ON equipment_integrations(plant_id, status);
+CREATE INDEX IF NOT EXISTS idx_equipment_samples_time ON equipment_string_samples(integration_id, sample_at);
+CREATE INDEX IF NOT EXISTS idx_equipment_alarms_time ON equipment_alarms(integration_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date, status);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
 CREATE INDEX IF NOT EXISTS idx_cash_competence ON cash_transactions(competence_month, transaction_type, status);
@@ -737,6 +791,7 @@ def init_db(seed: bool = True) -> None:
         )
         if seed and fresh_install:
             _seed(conn)
+            _seed_equipment_demo(conn)
         current_month = date.today().replace(day=1).isoformat()
         _normalize_active_recurring_contracts(conn, current_month)
         _ensure_recurring_invoices(conn, current_month)
@@ -1115,6 +1170,102 @@ def _seed(conn: sqlite3.Connection | PostgresConnection) -> None:
                 VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (contract_id, month, due, value, status, paid_at, "Mensalidade de pós-venda"),
             )
+
+
+def _seed_equipment_demo(conn: sqlite3.Connection | PostgresConnection) -> None:
+    """Add a local-only equipment dataset without touching hosted customer databases."""
+    existing = conn.execute("SELECT COUNT(*) AS value FROM equipment_integrations").fetchone()
+    count = existing["value"] if isinstance(existing, dict) else existing[0]
+    if count:
+        return
+    plant = conn.execute(
+        "SELECT id FROM plants WHERE inverter IS NOT NULL AND inverter!='' ORDER BY id LIMIT 1"
+    ).fetchone()
+    if not plant:
+        return
+    plant_id = int(plant["id"] if isinstance(plant, dict) else plant[0])
+    cursor = conn.execute(
+        """INSERT INTO equipment_integrations
+           (plant_id, name, provider, base_url, auth_type, credential_key_encrypted,
+            credential_secret_encrypted, credential_hint, device_sn, strings_path,
+            alarms_path, status, last_sync_at, last_sync_status)
+           VALUES (?, 'Inversor principal · demonstração', 'Demonstração local',
+                   'https://demo.solaros.local', 'Sem autenticação', '', '', '-',
+                   'INV-DEMO-01', '/strings', '/alarms', 'Conectada', ?, 'Sucesso')""",
+        (plant_id, datetime.now().isoformat(timespec="seconds")),
+    )
+    integration_id = int(getattr(cursor, "lastrowid", 0) or 0)
+    if getattr(conn, "is_postgres", False):
+        row = conn.execute(
+            "SELECT id FROM equipment_integrations WHERE plant_id=? AND name='Inversor principal · demonstração'",
+            (plant_id,),
+        ).fetchone()
+        integration_id = int(row["id"] if isinstance(row, dict) else row[0])
+
+    current_curve = [0.20, 0.75, 1.85, 3.55, 5.10, 6.30, 6.95, 6.45, 5.20, 3.45, 1.75, 0.65, 0.12]
+    sample_day = date.today()
+    sample_rows = []
+    for offset, base_current in enumerate(current_curve):
+        hour = 6 + offset
+        sample_at = datetime.combine(sample_day, datetime.min.time()).replace(hour=hour).isoformat(timespec="seconds")
+        for mppt_number in (1, 2):
+            for string_number in range(1, 5):
+                global_string = string_number + (mppt_number - 1) * 4
+                factor = 1 + ((global_string % 3) - 1) * 0.018
+                if global_string == 2 and 9 <= hour <= 12:
+                    factor *= 0.64
+                if global_string == 8:
+                    factor *= 0.71
+                current = round(base_current * factor, 3)
+                voltage = round(554 + mppt_number * 4 + (global_string % 2) * 3, 1)
+                power = round(current * voltage / 1000, 4)
+                sample_rows.append(
+                    (
+                        integration_id,
+                        sample_at,
+                        "Huawei SUN2000-75KTL",
+                        f"MPPT {mppt_number}",
+                        f"S{global_string}",
+                        current,
+                        voltage,
+                        power,
+                        "Demonstração",
+                    )
+                )
+    conn.executemany(
+        """INSERT INTO equipment_string_samples
+           (integration_id, sample_at, inverter_name, mppt, string_name, current_a,
+            voltage_v, power_kw, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        sample_rows,
+    )
+    conn.executemany(
+        """INSERT INTO equipment_alarms
+           (integration_id, external_id, occurred_at, code, severity, title, message, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (
+                integration_id,
+                "DEMO-DC-002",
+                datetime.combine(sample_day, datetime.min.time()).replace(hour=10, minute=18).isoformat(timespec="seconds"),
+                "DC-LOW-02",
+                "Alta",
+                "Corrente abaixo do par na string S2",
+                "Déficit concentrado entre 09h e 12h; verificar sombreamento localizado.",
+                "Aberto",
+            ),
+            (
+                integration_id,
+                "DEMO-DC-008",
+                datetime.combine(sample_day, datetime.min.time()).replace(hour=8, minute=42).isoformat(timespec="seconds"),
+                "DC-LOW-08",
+                "Crítica",
+                "Déficit persistente na string S8",
+                "Corrente reduzida durante toda a janela solar; verificar conexão, fusível e string aberta.",
+                "Em análise",
+            ),
+        ],
+    )
 
 
 def _iso_days(offset: int) -> str:
