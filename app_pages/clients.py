@@ -15,7 +15,7 @@ clients = query("SELECT * FROM clients ORDER BY CASE status WHEN 'Ativo' THEN 1 
 
 with st.container(horizontal=True, horizontal_alignment="right"):
     add_client = st.popover("Novo cliente", icon=":material/person_add:")
-    export_df = query_df("SELECT name AS Cliente, document AS Documento, contact_name AS Contato, email AS Email, phone AS Telefone, city AS Cidade, state AS UF, status AS Status FROM clients ORDER BY name")
+    export_df = query_df("SELECT name AS \"Cliente\", document AS \"Documento\", contact_name AS \"Contato\", email AS \"Email\", phone AS \"Telefone\", city AS \"Cidade\", state AS \"UF\", status AS \"Status\" FROM clients ORDER BY name")
     st.download_button("Exportar", export_df.to_csv(index=False).encode("utf-8-sig"), "clientes.csv", "text/csv", icon=":material/download:")
 
 with add_client:

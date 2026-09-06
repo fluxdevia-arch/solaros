@@ -117,17 +117,17 @@ with import_data:
 months = available_months()
 selected_month = st.selectbox("Mês analisado", months, format_func=month_label, key="readings_month")
 data = query_df(
-    """SELECT p.id AS usina_id, c.name AS Cliente, p.name AS Usina, p.unit_code AS UC,
-              p.expected_monthly_kwh AS Esperado, r.consumption_kwh AS Consumo,
-              r.generation_kwh AS Geração, r.injected_kwh AS Injetada,
-              r.compensated_kwh AS Compensada, r.availability_pct AS Disponibilidade,
+    """SELECT p.id AS usina_id, c.name AS "Cliente", p.name AS "Usina", p.unit_code AS "UC",
+              p.expected_monthly_kwh AS "Esperado", r.consumption_kwh AS "Consumo",
+              r.generation_kwh AS "Geração", r.injected_kwh AS "Injetada",
+              r.compensated_kwh AS "Compensada", r.availability_pct AS "Disponibilidade",
               COALESCE((SELECT SUM(br.allocated_kwh) FROM beneficiary_readings br
                         JOIN beneficiaries b ON b.id=br.beneficiary_id
-                        WHERE b.plant_id=p.id AND br.reference_month=r.reference_month),0) AS Beneficiada,
-              r.performance_ratio AS Desempenho, r.billed_amount AS Fatura,
-              r.reference_amount AS 'Custo sem solar',
-              (r.reference_amount-r.billed_amount) AS Economia,
-              r.incidents AS Ocorrências, r.failure_notes AS Observações
+                        WHERE b.plant_id=p.id AND br.reference_month=r.reference_month),0) AS "Beneficiada",
+              r.performance_ratio AS "Desempenho", r.billed_amount AS "Fatura",
+              r.reference_amount AS "Custo sem solar",
+              (r.reference_amount-r.billed_amount) AS "Economia",
+              r.incidents AS "Ocorrências", r.failure_notes AS "Observações"
        FROM readings r JOIN plants p ON p.id=r.plant_id
        JOIN clients c ON c.id=p.client_id
        WHERE r.reference_month=? ORDER BY c.name, p.name""",

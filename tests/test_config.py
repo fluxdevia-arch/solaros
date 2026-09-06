@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 import os
+import re
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from solar_crm import config
 
 
 class DatabaseConfigurationTests(unittest.TestCase):
+    def test_page_queries_do_not_use_single_quoted_sql_aliases(self):
+        pages_dir = Path(__file__).resolve().parents[1] / "app_pages"
+        invalid_alias = re.compile(r"\bAS\s+'[^']+'", re.IGNORECASE)
+
+        offenders = [
+            path.name
+            for path in pages_dir.glob("*.py")
+            if invalid_alias.search(path.read_text(encoding="utf-8"))
+        ]
+
+        self.assertEqual(offenders, [], "Use double quotes for PostgreSQL column aliases")
+
     def test_builds_encoded_postgres_url_from_separate_secrets(self):
         values = {
             "url": "",

@@ -154,14 +154,14 @@ with tickets_tab:
 with calendar_tab:
     horizon = date.today() + timedelta(days=45)
     agenda = query_df(
-        """SELECT t.due_date AS Data, t.title AS Compromisso, t.category AS Categoria,
-                  c.name AS Cliente, COALESCE(p.name,'Geral') AS Usina, t.assignee AS Responsável,
-                  t.status AS Status
+        """SELECT t.due_date AS "Data", t.title AS "Compromisso", t.category AS "Categoria",
+                  c.name AS "Cliente", COALESCE(p.name,'Geral') AS "Usina", t.assignee AS "Responsável",
+                  t.status AS "Status"
            FROM tasks t JOIN clients c ON c.id=t.client_id LEFT JOIN plants p ON p.id=t.plant_id
            WHERE date(t.due_date) BETWEEN date('now') AND date(?) AND t.status NOT IN ('Concluída','Cancelada')
            UNION ALL
-           SELECT p.next_cleaning_date AS Data, 'Limpeza programada' AS Compromisso, 'Limpeza' AS Categoria,
-                  c.name AS Cliente, p.name AS Usina, 'Equipe técnica' AS Responsável, 'Planejar' AS Status
+           SELECT p.next_cleaning_date AS "Data", 'Limpeza programada' AS "Compromisso", 'Limpeza' AS "Categoria",
+                  c.name AS "Cliente", p.name AS "Usina", 'Equipe técnica' AS "Responsável", 'Planejar' AS "Status"
            FROM plants p JOIN clients c ON c.id=p.client_id
            WHERE date(p.next_cleaning_date) BETWEEN date('now') AND date(?)
            ORDER BY Data""",

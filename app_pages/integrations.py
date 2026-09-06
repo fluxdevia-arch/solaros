@@ -289,8 +289,8 @@ with sync_tab:
                 st.error(str(exc))
 
         daily = query_df(
-            """SELECT reading_date AS Data, generation_kwh AS Geração,
-                      peak_power_kw AS 'Pico de potência', alarms_count AS Alarmes, source AS Fonte
+            """SELECT reading_date AS "Data", generation_kwh AS "Geração",
+                      peak_power_kw AS "Pico de potência", alarms_count AS "Alarmes", source AS "Fonte"
                FROM telemetry_daily WHERE plant_id=? AND substr(reading_date,1,7)=?
                ORDER BY reading_date""",
             (selected_mapping["plant_id"], sync_month.strftime("%Y-%m")),
@@ -310,11 +310,11 @@ with sync_tab:
 
 with history_tab:
     logs = query_df(
-        """SELECT l.started_at AS Início, l.finished_at AS Término,
-                  c.name AS Cliente, p.name AS Usina, mi.provider AS Portal,
-                  l.reference_month AS Mês, l.status AS Resultado,
-                  l.records_received AS Registros, l.generation_kwh AS Geração,
-                  l.message AS Mensagem
+        """SELECT l.started_at AS "Início", l.finished_at AS "Término",
+                  c.name AS "Cliente", p.name AS "Usina", mi.provider AS "Portal",
+                  l.reference_month AS "Mês", l.status AS "Resultado",
+                  l.records_received AS "Registros", l.generation_kwh AS "Geração",
+                  l.message AS "Mensagem"
            FROM integration_sync_logs l
            JOIN monitoring_integrations mi ON mi.id=l.integration_id
            LEFT JOIN plants p ON p.id=l.plant_id

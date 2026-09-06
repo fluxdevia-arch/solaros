@@ -18,7 +18,7 @@ all_plants = query(
 
 with st.container(horizontal=True, horizontal_alignment="right"):
     add_plant = st.popover("Nova usina", icon=":material/add:")
-    plant_export = query_df("""SELECT c.name AS Cliente, p.name AS Usina, p.unit_code AS UC, p.distributor AS Distribuidora, p.installed_kwp AS Potencia_kWp, p.expected_monthly_kwh AS Geracao_esperada_kWh, p.status AS Status, p.next_cleaning_date AS Proxima_limpeza FROM plants p JOIN clients c ON c.id=p.client_id ORDER BY c.name, p.name""")
+    plant_export = query_df("""SELECT c.name AS "Cliente", p.name AS "Usina", p.unit_code AS "UC", p.distributor AS "Distribuidora", p.installed_kwp AS "Potencia_kWp", p.expected_monthly_kwh AS "Geracao_esperada_kWh", p.status AS "Status", p.next_cleaning_date AS "Proxima_limpeza" FROM plants p JOIN clients c ON c.id=p.client_id ORDER BY c.name, p.name""")
     st.download_button("Exportar", plant_export.to_csv(index=False).encode("utf-8-sig"), "usinas.csv", "text/csv", icon=":material/download:")
 
 with add_plant:
@@ -274,9 +274,9 @@ with beneficiaries_tab:
 
 with history:
     readings = query_df(
-        """SELECT reference_month AS Mês, generation_kwh AS Geração, consumption_kwh AS Consumo,
-                  availability_pct AS Disponibilidade, performance_ratio AS 'Índice de performance',
-                  downtime_hours AS 'Indisponibilidade (h)', incidents AS Ocorrências
+        """SELECT reference_month AS "Mês", generation_kwh AS "Geração", consumption_kwh AS "Consumo",
+                  availability_pct AS "Disponibilidade", performance_ratio AS "Índice de performance",
+                  downtime_hours AS "Indisponibilidade (h)", incidents AS "Ocorrências"
            FROM readings WHERE plant_id=? ORDER BY reference_month""",
         (plant_id,),
     )
@@ -302,8 +302,8 @@ with notes_tab:
     st.write(plant["notes"] or "Nenhuma observação operacional cadastrada.")
     st.subheader("Ocorrências registradas", icon=":material/report_problem:")
     tickets = query_df(
-        """SELECT opened_at AS Abertura, title AS Ocorrência, category AS Categoria,
-                  severity AS Severidade, status AS Status, root_cause AS Causa, resolution AS Solução
+        """SELECT opened_at AS "Abertura", title AS "Ocorrência", category AS "Categoria",
+                  severity AS "Severidade", status AS "Status", root_cause AS "Causa", resolution AS "Solução"
            FROM tickets WHERE plant_id=? ORDER BY opened_at DESC""",
         (plant_id,),
     )

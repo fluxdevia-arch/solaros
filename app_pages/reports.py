@@ -27,18 +27,18 @@ client_id = c_map[client_name]
 settings = query_one("SELECT technical_name, technical_title, technical_registration, signature_image FROM settings WHERE id=1")
 
 data = query_df(
-    """SELECT p.name AS Usina, p.unit_code AS UC, p.expected_monthly_kwh AS Esperado,
-              COALESCE(r.consumption_kwh,0) AS Consumo, COALESCE(r.generation_kwh,0) AS Geração,
-              (SELECT COUNT(*) FROM beneficiaries b WHERE b.plant_id=p.id AND b.status='Ativo') AS Beneficiárias,
+    """SELECT p.name AS "Usina", p.unit_code AS "UC", p.expected_monthly_kwh AS "Esperado",
+              COALESCE(r.consumption_kwh,0) AS "Consumo", COALESCE(r.generation_kwh,0) AS "Geração",
+              (SELECT COUNT(*) FROM beneficiaries b WHERE b.plant_id=p.id AND b.status='Ativo') AS "Beneficiárias",
               COALESCE((SELECT SUM(br.allocated_kwh) FROM beneficiary_readings br
                         JOIN beneficiaries b ON b.id=br.beneficiary_id
-                        WHERE b.plant_id=p.id AND br.reference_month=?),0) AS Beneficiada,
-              COALESCE(r.availability_pct,0) AS Disponibilidade,
-              COALESCE(r.billed_amount,0) AS Fatura,
-              COALESCE(r.reference_amount,0) AS 'Custo sem solar',
-              COALESCE(r.reference_amount-r.billed_amount,0) AS Economia,
-              COALESCE(r.incidents,0) AS Ocorrências,
-              COALESCE(r.failure_notes,'') AS Observações
+                        WHERE b.plant_id=p.id AND br.reference_month=?),0) AS "Beneficiada",
+              COALESCE(r.availability_pct,0) AS "Disponibilidade",
+              COALESCE(r.billed_amount,0) AS "Fatura",
+              COALESCE(r.reference_amount,0) AS "Custo sem solar",
+              COALESCE(r.reference_amount-r.billed_amount,0) AS "Economia",
+              COALESCE(r.incidents,0) AS "Ocorrências",
+              COALESCE(r.failure_notes,'') AS "Observações"
        FROM plants p LEFT JOIN readings r ON r.plant_id=p.id AND r.reference_month=?
        WHERE p.client_id=? ORDER BY p.name""",
     (reference_month, reference_month, client_id),
