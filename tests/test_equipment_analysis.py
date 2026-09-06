@@ -7,8 +7,12 @@ from pathlib import Path
 from solar_crm.db import execute, init_db, query
 from solar_crm.equipment_analysis import (
     NORMALIZED_REST,
+    PHB85K_MT,
+    EquipmentAnalysisError,
     analyze_string_samples,
     create_equipment_integration,
+    equipment_profile,
+    phb85k_mt_collector_config,
     sync_equipment_integration,
 )
 
@@ -36,6 +40,20 @@ def _samples(factors: dict[str, list[float]]) -> list[dict]:
 
 
 class EquipmentDiagnosticTests(unittest.TestCase):
+    def test_phb85k_profile_and_collector_are_read_only(self):
+        profile = equipment_profile(PHB85K_MT)
+        config = phb85k_mt_collector_config(modbus_address=48)
+
+        self.assertEqual(profile["mppt_count"], 4)
+        self.assertEqual(profile["string_count"], 16)
+        self.assertEqual(config["modbus_address"], 48)
+        self.assertEqual(config["collector_mode"], "read_only")
+        self.assertEqual(config["register_map"], "SOLICITAR_MAPA_OFICIAL_PHB")
+
+    def test_phb85k_collector_rejects_invalid_modbus_address(self):
+        with self.assertRaises(EquipmentAnalysisError):
+            phb85k_mt_collector_config(modbus_address=0)
+
     def test_constant_deficit_is_classified_as_electrical(self):
         rows = _samples({"S1": [1, 1, 1, 1], "S2": [1, 1, 1, 1], "S3": [0.6, 0.6, 0.6, 0.6]})
 
@@ -159,6 +177,29 @@ class EquipmentIntegrationTests(unittest.TestCase):
         self.assertEqual(len(query("SELECT * FROM equipment_string_samples")), 1)
         self.assertEqual(len(query("SELECT * FROM equipment_alarms")), 1)
         self.assertIn("INV-123", session.calls[0][0])
+
+    def test_phb_gateway_uses_the_normalized_collector_contract(self):
+        source_id = create_equipment_integration(
+            plant_id=self.plant_id,
+            name="PHB85K-MT · 048",
+            provider=PHB85K_MT,
+            base_url="https://gateway.example.com",
+            auth_type="Sem autenticação",
+            credential_key="",
+            credential_secret="",
+            device_sn="048",
+            strings_path="/equipment/{device_sn}/strings?date={date}",
+            alarms_path="/equipment/{device_sn}/alarms?date={date}",
+        )
+
+        result = sync_equipment_integration(
+            source_id,
+            date(2026, 9, 6),
+            session=_EquipmentSession(),
+        )
+
+        self.assertEqual(result.string_samples, 1)
+        self.assertEqual(result.alarms, 1)
 
 
 if __name__ == "__main__":

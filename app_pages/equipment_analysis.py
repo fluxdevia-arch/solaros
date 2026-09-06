@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 
 import altair as alt
@@ -12,12 +13,15 @@ from solar_crm.equipment_analysis import (
     AUTH_TYPES,
     EQUIPMENT_PROVIDERS,
     NORMALIZED_REST,
+    PHB85K_MT,
     EquipmentAnalysisError,
     analyze_string_samples,
     available_equipment_days,
     create_equipment_integration,
+    equipment_profile,
     load_equipment_alarms,
     load_string_samples,
+    phb85k_mt_collector_config,
     sync_equipment_integration,
 )
 from solar_crm.ui import csv_download, empty_state, flash, page_intro, show_flash, status_badge
@@ -381,16 +385,69 @@ with api_tab:
 
     with st.expander("Adicionar API de equipamento", icon=":material/add:"):
         provider = st.selectbox("Fabricante / adaptador", EQUIPMENT_PROVIDERS, key="new_equipment_provider")
-        if provider != NORMALIZED_REST:
+        profile = equipment_profile(provider)
+        if profile:
+            with st.container(border=True):
+                st.subheader("Perfil reconhecido", icon=":material/memory:")
+                with st.container(horizontal=True):
+                    st.metric("Modelo", profile["model"], border=True)
+                    st.metric("Potência nominal", f"{profile['nominal_power_kw']} kW", border=True)
+                    st.metric("MPPTs", profile["mppt_count"], border=True)
+                    st.metric("Strings", profile["string_count"], border=True)
+                st.caption(
+                    f"{profile['ac_output']} · {profile['transport']} · "
+                    f"{profile['strings_per_mppt']} strings por MPPT."
+                )
+                st.link_button(
+                    "Abrir manual oficial PHB",
+                    profile["documentation_url"],
+                    icon=":material/menu_book:",
+                )
+        if provider == PHB85K_MT:
+            st.info(
+                "O SolarOS Cloud recebe os dados por HTTPS. No local da usina, conecte um coletor ao RS485 "
+                "do inversor e mantenha o Modbus somente para leitura.",
+                icon=":material/cable:",
+            )
+            modbus_address = st.number_input(
+                "Endereço Modbus do PHB",
+                min_value=1,
+                max_value=247,
+                value=48,
+                step=1,
+                help="Foi preenchido como 48 a partir da identificação 048 informada. Confirme no InvApp/inversor.",
+            )
+            collector_config = phb85k_mt_collector_config(modbus_address=int(modbus_address))
+            st.download_button(
+                "Baixar configuração do coletor PHB",
+                data=json.dumps(collector_config, ensure_ascii=False, indent=2),
+                file_name="phb85k-mt-048-coletor.json",
+                mime="application/json",
+                icon=":material/download:",
+            )
+            st.warning(
+                "A PHB confirma Modbus RTU, mas o manual público não traz a tabela de registradores nem todos "
+                "os parâmetros seriais. O coletor não fará leituras até esses dados serem confirmados no mapa "
+                "oficial do modelo.",
+                icon=":material/warning:",
+            )
+        elif provider != NORMALIZED_REST:
             st.warning(
                 "Esse fabricante exige um adaptador específico para converter os campos proprietários. "
                 "Você pode salvar a configuração agora, mas a sincronização ficará pendente até o adaptador ser ativado.",
                 icon=":material/info:",
             )
         with st.form("new_equipment_integration"):
-            name = st.text_input("Nome da fonte", placeholder="Ex.: Inversor 1 · telhado norte")
+            name = st.text_input(
+                "Nome da fonte",
+                value="PHB85K-MT · 048" if provider == PHB85K_MT else "",
+                placeholder="Ex.: Inversor 1 · telhado norte",
+            )
             base_url = st.text_input("Endereço-base HTTPS", placeholder="https://api.fabricante.com")
-            device_sn = st.text_input("Número de série / ID do inversor")
+            device_sn = st.text_input(
+                "Número de série / ID do inversor",
+                value="048" if provider == PHB85K_MT else "",
+            )
             auth_type = st.selectbox("Autenticação", AUTH_TYPES)
             api_key = st.text_input(
                 "Usuário ou nome do cabeçalho",

@@ -13,8 +13,10 @@ from solar_crm.secure_store import protect_secret, unprotect_secret
 
 
 NORMALIZED_REST = "REST normalizada"
+PHB85K_MT = "PHB PHB85K-MT · RS485/Modbus RTU"
 EQUIPMENT_PROVIDERS = [
     NORMALIZED_REST,
+    PHB85K_MT,
     "Huawei FusionSolar",
     "Growatt OpenAPI",
     "SolisCloud",
@@ -22,6 +24,25 @@ EQUIPMENT_PROVIDERS = [
     "Sungrow iSolarCloud",
 ]
 AUTH_TYPES = ["Bearer token", "Basic Auth", "API key no cabeçalho", "Sem autenticação"]
+
+EQUIPMENT_PROFILES: dict[str, dict[str, Any]] = {
+    PHB85K_MT: {
+        "manufacturer": "PHB",
+        "model": "PHB85K-MT",
+        "nominal_power_kw": 85,
+        "ac_output": "Trifásico 380/220 V",
+        "mppt_count": 4,
+        "strings_per_mppt": 4,
+        "string_count": 16,
+        "transport": "RS485 / Modbus RTU",
+        "logger": "PHBLOGGER Pro ou coletor SolarOS local",
+        "maximum_bus_distance_m": 1000,
+        "documentation_url": (
+            "https://www.energiasolarphb.com.br/wp-content/uploads/2022/04/"
+            "Manual-do-Usuario-MT-35K_60K_75K_50K_85K-v1.1.pdf"
+        ),
+    }
+}
 
 
 class EquipmentAnalysisError(RuntimeError):
@@ -53,6 +74,46 @@ class StringDiagnostic:
 class EquipmentSyncResult:
     string_samples: int
     alarms: int
+
+
+def equipment_profile(provider: str) -> dict[str, Any] | None:
+    """Return a copy so callers cannot mutate the registered equipment profile."""
+    profile = EQUIPMENT_PROFILES.get(provider)
+    return dict(profile) if profile else None
+
+
+def phb85k_mt_collector_config(*, modbus_address: int = 48) -> dict[str, Any]:
+    """Build the safe, read-only handoff used by the on-site PHB collector.
+
+    PHB's public user manual confirms Modbus RTU but does not publish the
+    register table or serial framing. Those values therefore remain explicit
+    commissioning checks instead of unsafe guessed defaults.
+    """
+    if not 1 <= int(modbus_address) <= 247:
+        raise EquipmentAnalysisError("O endereço Modbus deve ficar entre 1 e 247.")
+    return {
+        "manufacturer": "PHB",
+        "model": "PHB85K-MT",
+        "collector_mode": "read_only",
+        "transport": "modbus_rtu",
+        "serial_port": "COM3 ou /dev/ttyUSB0",
+        "modbus_address": int(modbus_address),
+        "baudrate": "CONFIRMAR_NO_INVERSOR",
+        "parity": "CONFIRMAR_NO_INVERSOR",
+        "stop_bits": "CONFIRMAR_NO_INVERSOR",
+        "register_map": "SOLICITAR_MAPA_OFICIAL_PHB",
+        "poll_interval_seconds": 60,
+        "topology": {
+            "mppt_count": 4,
+            "strings_per_mppt": 4,
+            "string_count": 16,
+        },
+        "publish": {
+            "protocol": "https",
+            "strings_path": "/equipment/{device_sn}/strings?date={date}",
+            "alarms_path": "/equipment/{device_sn}/alarms?date={date}",
+        },
+    }
 
 
 def _validated_base_url(value: str) -> str:
@@ -173,7 +234,7 @@ def sync_equipment_integration(
     source = query_one("SELECT * FROM equipment_integrations WHERE id=?", (int(integration_id),))
     if not source:
         raise EquipmentAnalysisError("Fonte de equipamentos não encontrada.")
-    if source["provider"] != NORMALIZED_REST:
+    if source["provider"] not in {NORMALIZED_REST, PHB85K_MT}:
         raise EquipmentAnalysisError(
             "Este fabricante exige um adaptador próprio. Use REST normalizada por meio do gateway do "
             "fabricante ou solicite a ativação do conector específico."
