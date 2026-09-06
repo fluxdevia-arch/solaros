@@ -7,6 +7,7 @@ from solar_crm.deletion import delete_record
 from solar_crm.db import init_db, query_one
 from solar_crm.records import create_special_sizing_project
 from solar_crm.special_sizing import calculate_energy_system, calculate_solar_pumping
+from solar_crm.sizing_documents import generate_general_sizing_pdf, generate_special_sizing_pdf
 
 
 LOADS = [
@@ -147,6 +148,27 @@ class SpecialSizingPersistenceTests(unittest.TestCase):
 
         delete_record("special_sizing_project", project_id)
         self.assertIsNone(query_one("SELECT id FROM special_sizing_projects WHERE id=?", (project_id,)))
+
+    def test_dimensioning_documents_are_generated_as_pdf(self):
+        result = calculate_energy_system("Híbrido conectado", LOADS, INPUTS)
+        special_pdf = generate_special_sizing_pdf(
+            {
+                "name": "Residência teste",
+                "client_name": "Cliente SolarOS",
+                "address": "João Pessoa/PB",
+                "system_type": "Híbrido conectado",
+                "phases": "Monofásico",
+                "ac_voltage_v": 230,
+            },
+            result,
+        )
+        general_pdf = generate_general_sizing_pdf(
+            "# SolarOS — memorial de pré-dimensionamento\n\n## Sistema fotovoltaico\n- Potência fotovoltaica: 5,85 kWp"
+        )
+        self.assertTrue(special_pdf.startswith(b"%PDF"))
+        self.assertTrue(general_pdf.startswith(b"%PDF"))
+        self.assertGreater(len(special_pdf), 5_000)
+        self.assertGreater(len(general_pdf), 3_000)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 
 from solar_crm.db import query
+from solar_crm.document_cache import general_sizing_pdf, special_sizing_pdf
 from solar_crm.engineering import calculate_complete_project, extract_datasheet_hints, generate_roof_croqui
 from solar_crm.records import create_pv_inverter, create_pv_module, create_sizing_project, create_special_sizing_project
 from solar_crm.sizing import (
@@ -21,7 +23,6 @@ from solar_crm.sizing import (
 from solar_crm.special_sizing import (
     BATTERY_CHEMISTRIES,
     SYSTEM_TYPES,
-    build_special_memorial,
     calculate_energy_system,
     calculate_solar_pumping,
 )
@@ -679,13 +680,17 @@ with special_tab:
             with st.expander("Alertas e validações obrigatórias", expanded=True, icon=":material/warning:"):
                 for warning in result["warnings"]:
                     st.warning(warning)
-        memorial = build_special_memorial(special_complete["values"], result)
+        pdf = special_sizing_pdf(
+            json.dumps(special_complete["values"], ensure_ascii=False, sort_keys=True),
+            json.dumps(result, ensure_ascii=False, sort_keys=True),
+            "",
+        )
         with st.container(horizontal=True):
             st.download_button(
-                "Baixar memorial técnico",
-                memorial.encode("utf-8"),
-                file_name=f"solaros-{special_mode.lower().replace(' ', '-')}.md",
-                mime="text/markdown",
+                "Baixar memorial técnico em PDF",
+                pdf,
+                file_name=f"solaros-{special_mode.lower().replace(' ', '-')}.pdf",
+                mime="application/pdf",
                 icon=":material/download:",
             )
             if st.button("Salvar projeto especial", type="primary", icon=":material/save:"):
@@ -906,11 +911,12 @@ with memorial_tab:
     if not has_results:
         st.info("Calcule pelo menos uma das etapas para montar o memorial.")
     else:
+        pdf = general_sizing_pdf(memorial, "")
         st.download_button(
-            "Baixar memorial (.md)",
-            memorial.encode("utf-8"),
-            file_name="solaros_memorial_dimensionamento.md",
-            mime="text/markdown",
+            "Baixar memorial em PDF",
+            pdf,
+            file_name="solaros_memorial_dimensionamento.pdf",
+            mime="application/pdf",
             type="primary",
             icon=":material/download:",
         )

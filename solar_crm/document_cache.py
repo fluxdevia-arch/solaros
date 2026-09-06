@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
+
 import streamlit as st
 
 from solar_crm.inspection_documents import generate_inspection_pdf
 from solar_crm.proposal_documents import generate_proposal_pdf
 from solar_crm.service_documents import generate_service_contract_pdf, generate_service_order_pdf
+from solar_crm.sizing_documents import generate_general_sizing_pdf, generate_special_sizing_pdf
 
 
 @st.cache_data(ttl="5m", max_entries=64, show_spinner=False)
@@ -27,9 +30,21 @@ def service_contract_pdf(contract_id: int, document_version: str) -> bytes:
     return generate_service_contract_pdf(contract_id)
 
 
+@st.cache_data(ttl="10m", max_entries=64, show_spinner=False)
+def special_sizing_pdf(project_json: str, result_json: str, document_version: str) -> bytes:
+    return generate_special_sizing_pdf(json.loads(project_json), json.loads(result_json))
+
+
+@st.cache_data(ttl="10m", max_entries=64, show_spinner=False)
+def general_sizing_pdf(memorial: str, document_version: str) -> bytes:
+    return generate_general_sizing_pdf(memorial)
+
+
 def clear_document_caches() -> None:
     """Invalidate branded documents after company identity changes."""
     inspection_pdf.clear()
     proposal_pdf.clear()
     service_order_pdf.clear()
     service_contract_pdf.clear()
+    special_sizing_pdf.clear()
+    general_sizing_pdf.clear()
