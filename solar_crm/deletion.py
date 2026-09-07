@@ -32,6 +32,7 @@ ENTITIES: dict[str, EntityDefinition] = {
     "inspection_photo": EntityDefinition("inspection_photos", "foto da vistoria"),
     "plant_equipment": EntityDefinition("plant_equipment", "equipamento da usina"),
     "plant_equipment_photo": EntityDefinition("plant_equipment_photos", "foto do equipamento"),
+    "inverter_curve_analysis": EntityDefinition("inverter_curve_analyses", "análise de curva do inversor"),
     "service_contract": EntityDefinition("service_contracts", "contrato de serviço"),
     "pv_module": EntityDefinition("pv_modules", "módulo fotovoltaico"),
     "pv_inverter": EntityDefinition("pv_inverters", "inversor"),
@@ -99,17 +100,19 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
                (SELECT COUNT(*) FROM beneficiaries WHERE plant_id=?) AS beneficiaries,
                (SELECT COUNT(*) FROM telemetry_daily WHERE plant_id=?) AS telemetry,
                (SELECT COUNT(*) FROM plant_equipment WHERE plant_id=?) AS equipment,
+               (SELECT COUNT(*) FROM inverter_curve_analyses WHERE plant_id=?) AS curve_analyses,
                (SELECT COUNT(*) FROM tasks WHERE plant_id=?) AS tasks,
                (SELECT COUNT(*) FROM tickets WHERE plant_id=?) AS tickets,
                (SELECT COUNT(*) FROM service_orders WHERE plant_id=?) AS service_orders,
                (SELECT COUNT(*) FROM site_inspections WHERE plant_id=?) AS inspections,
                (SELECT COUNT(*) FROM cash_transactions WHERE plant_id=?) AS cash""",
-            (rid,) * 9,
+            (rid,) * 10,
         ) or {}
         _append_count(lines, int(summary.get("readings", 0)), "leitura mensal", "leituras mensais")
         _append_count(lines, int(summary.get("beneficiaries", 0)), "beneficiária", "beneficiárias")
         _append_count(lines, int(summary.get("telemetry", 0)), "registro diário de geração", "registros diários de geração")
         _append_count(lines, int(summary.get("equipment", 0)), "equipamento cadastrado", "equipamentos cadastrados")
+        _append_count(lines, int(summary.get("curve_analyses", 0)), "análise de curva", "análises de curva")
         _append_count(lines, int(summary.get("tasks", 0)), "atividade", "atividades")
         detached = sum(int(summary.get(key, 0)) for key in ("tickets", "service_orders", "inspections", "cash"))
         if detached:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 
 import altair as alt
@@ -21,11 +22,20 @@ from solar_crm.equipment_analysis import (
     load_string_samples,
     sync_equipment_integration,
 )
-from solar_crm.ui import csv_download, empty_state, flash, page_intro, show_flash, status_badge
+from solar_crm.inverter_curve import (
+    FIELD_LABELS,
+    CurveAnalysisError,
+    analyze_inverter_curve,
+    load_curve_history,
+    save_curve_analysis,
+    suggest_column_mapping,
+    workbook_preview,
+)
+from solar_crm.ui import csv_download, empty_state, flash, page_intro, render_delete_control, show_flash, status_badge
 
 
 page_intro(
-    "Compare strings do mesmo MPPT, estime perdas e concentre falhas e alarmes enviados pela API do inversor."
+    "Analise arquivos Excel exportados pelo inversor ou compare strings e alarmes recebidos por API."
 )
 show_flash()
 
@@ -46,6 +56,7 @@ plant_map = {f"{row['name']} · {row['client_name']}": int(row["id"]) for row in
 with st.container(horizontal=True, vertical_alignment="bottom"):
     selected_label = st.selectbox("Usina", list(plant_map), key="equipment_plant")
     plant_id = plant_map[selected_label]
+    selected_plant = next(row for row in plants if int(row["id"]) == plant_id)
     available_days = available_equipment_days(plant_id)
     default_day = available_days[0] if available_days else date.today()
     reading_day = st.date_input("Dia analisado", value=default_day, key="equipment_day")
@@ -83,9 +94,10 @@ with st.container(horizontal=True):
     st.metric("Alarmes ativos", len(open_alarms), border=True)
     st.metric("Perda estimada no dia", f"{number_br(loss_kwh, 1)} kWh", border=True)
 
-overview_tab, strings_tab, alarms_tab, api_tab = st.tabs(
+overview_tab, excel_tab, strings_tab, alarms_tab, api_tab = st.tabs(
     [
         ":material/monitoring: Visão geral",
+        ":material/upload_file: Analisar Excel",
         ":material/electric_bolt: Diagnóstico de strings",
         ":material/report_problem: Falhas e alarmes",
         ":material/api: Fontes de API",
@@ -303,6 +315,305 @@ with strings_tab:
             "Sincronize a API ou escolha outra data com telemetria disponível.",
             ":material/electric_bolt:",
         )
+
+with excel_tab:
+    st.subheader("Curva diária do inversor", icon=":material/upload_file:")
+    st.caption(
+        "Envie o .xlsx original do portal. A ordem das colunas não importa: o SolarOS reconhece nomes, "
+        "unidades, abreviações e qualquer quantidade de MPPTs. O diagnóstico indica evidências e não "
+        "substitui o datasheet, a medição em campo ou a avaliação do responsável técnico."
+    )
+    uploaded_curve = st.file_uploader(
+        "Relatório Excel do inversor",
+        type=["xlsx"],
+        key=f"inverter_curve_file_{plant_id}",
+        help="Exporte o relatório diário diretamente do portal, sem reorganizar as colunas.",
+    )
+    if uploaded_curve is not None:
+        file_bytes = uploaded_curve.getvalue()
+        try:
+            sheet_names, first_preview, default_sheet = workbook_preview(file_bytes)
+            selected_sheet = st.selectbox(
+                "Planilha com os dados",
+                sheet_names,
+                index=sheet_names.index(default_sheet),
+                key=f"curve_sheet_{plant_id}_{uploaded_curve.name}",
+            )
+            _, preview, _ = workbook_preview(file_bytes, selected_sheet)
+            automatic_mapping = suggest_column_mapping(list(preview.columns))
+
+            with st.expander("Campos identificados e ajuste manual", icon=":material/account_tree:"):
+                identified = pd.DataFrame(
+                    [
+                        {
+                            "Dado técnico": FIELD_LABELS.get(field, field.replace("_", " ").upper()),
+                            "Coluna do Excel": column,
+                        }
+                        for field, column in automatic_mapping.items()
+                    ]
+                )
+                if identified.empty:
+                    st.warning("Nenhum campo foi identificado automaticamente. Faça o mapeamento abaixo.")
+                else:
+                    st.dataframe(identified, hide_index=True)
+                st.caption("Se algum fabricante usar um título diferente, selecione a coluna correta. Campos opcionais podem ficar em branco.")
+                options = ["— Não informado —", *map(str, preview.columns)]
+                manual_mapping: dict[str, str] = {}
+                core_fields = list(FIELD_LABELS)
+                mapping_columns = st.columns(2)
+                for index, field in enumerate(core_fields):
+                    current = automatic_mapping.get(field)
+                    selected = mapping_columns[index % 2].selectbox(
+                        FIELD_LABELS[field],
+                        options,
+                        index=options.index(current) if current in options else 0,
+                        key=f"curve_map_{plant_id}_{field}_{uploaded_curve.name}",
+                    )
+                    if selected != options[0]:
+                        manual_mapping[field] = selected
+                mppt_count = st.number_input(
+                    "Quantidade de MPPTs para mapear manualmente",
+                    min_value=0,
+                    max_value=20,
+                    value=max(
+                        [int(field.split("_")[1]) for field in automatic_mapping if field.startswith("mppt_")]
+                        or [0]
+                    ),
+                    step=1,
+                    key=f"curve_mppt_count_{plant_id}_{uploaded_curve.name}",
+                )
+                for mppt_id in range(1, int(mppt_count) + 1):
+                    current_field = f"mppt_{mppt_id}_current_a"
+                    voltage_field = f"mppt_{mppt_id}_voltage_v"
+                    left, right = st.columns(2)
+                    current_default = automatic_mapping.get(current_field)
+                    voltage_default = automatic_mapping.get(voltage_field)
+                    current_selected = left.selectbox(
+                        f"MPPT {mppt_id} · corrente (A)",
+                        options,
+                        index=options.index(current_default) if current_default in options else 0,
+                        key=f"curve_map_{plant_id}_{current_field}_{uploaded_curve.name}",
+                    )
+                    voltage_selected = right.selectbox(
+                        f"MPPT {mppt_id} · tensão (V)",
+                        options,
+                        index=options.index(voltage_default) if voltage_default in options else 0,
+                        key=f"curve_map_{plant_id}_{voltage_field}_{uploaded_curve.name}",
+                    )
+                    if current_selected != options[0]:
+                        manual_mapping[current_field] = current_selected
+                    if voltage_selected != options[0]:
+                        manual_mapping[voltage_field] = voltage_selected
+
+            settings_left, settings_middle, settings_right = st.columns(3)
+            inverter_name = settings_left.text_input(
+                "Inversor / identificação",
+                value=str(selected_plant.get("inverter") or "Inversor principal"),
+                key=f"curve_inverter_{plant_id}_{uploaded_curve.name}",
+            )
+            nominal_power = settings_middle.number_input(
+                "Potência nominal do inversor (kW)",
+                min_value=0.0,
+                value=0.0,
+                step=0.5,
+                help="Opcional. Melhora a análise de pico e clipping.",
+                key=f"curve_nominal_{plant_id}_{uploaded_curve.name}",
+            )
+            nominal_voltage = settings_right.number_input(
+                "Tensão nominal monitorada (V)",
+                min_value=100.0,
+                max_value=800.0,
+                value=220.0,
+                step=1.0,
+                key=f"curve_voltage_{plant_id}_{uploaded_curve.name}",
+            )
+
+            with st.spinner("Lendo curvas e avaliando possíveis anomalias..."):
+                curve_result = analyze_inverter_curve(
+                    file_bytes,
+                    uploaded_curve.name,
+                    sheet_name=selected_sheet,
+                    column_mapping=manual_mapping,
+                    nominal_power_kw=float(nominal_power),
+                    nominal_grid_voltage_v=float(nominal_voltage),
+                )
+            summary = curve_result["summary"]
+            status = summary["health_status"]
+            if status == "Crítica":
+                st.error("Foram encontrados indícios que exigem verificação prioritária.", icon=":material/error:")
+            elif status == "Atenção":
+                st.warning("Foram encontrados desvios que merecem conferência técnica.", icon=":material/warning:")
+            else:
+                st.success("Nenhuma anomalia evidente foi encontrada nos dados disponíveis.", icon=":material/check_circle:")
+
+            with st.container(horizontal=True):
+                st.metric("Situação", status, border=True)
+                st.metric("Geração do dia", f"{number_br(summary['daily_energy_kwh'], 2)} kWh", border=True)
+                st.metric("Pico de potência", f"{number_br(summary['peak_power_kw'], 2)} kW", border=True)
+                st.metric("Tempo em operação", f"{number_br(summary['operating_hours'], 1)} h", border=True)
+                st.metric("Amostras válidas", summary["sample_count"], border=True)
+                st.metric("Achados", summary["issue_count"], border=True)
+
+            curve_data = curve_result["data"]
+            power_columns = [column for column in ("active_power_kw", "pv_power_kw") if column in curve_data]
+            power_labels = {"active_power_kw": "Potência ativa", "pv_power_kw": "Potência FV"}
+            if power_columns:
+                power_chart_data = curve_data[["timestamp", *power_columns]].melt(
+                    "timestamp", var_name="series", value_name="power_kw"
+                )
+                power_chart_data["series"] = power_chart_data["series"].map(power_labels)
+                power_chart = (
+                    alt.Chart(power_chart_data)
+                    .mark_line(strokeWidth=2.5)
+                    .encode(
+                        x=alt.X("timestamp:T", title=None, axis=alt.Axis(format="%H:%M")),
+                        y=alt.Y("power_kw:Q", title="Potência (kW)"),
+                        color=alt.Color("series:N", title=None, legend=alt.Legend(orient="top")),
+                        tooltip=[alt.Tooltip("timestamp:T", title="Horário", format="%H:%M"), "series:N", alt.Tooltip("power_kw:Q", title="kW", format=".2f")],
+                    )
+                    .properties(height=330, title="Curva de potência do dia")
+                    .interactive(bind_y=False)
+                )
+                st.altair_chart(power_chart)
+
+            mppt_current_columns = [column for column in curve_data if re.match(r"mppt_\d+_current_a", column)]
+            mppt_voltage_columns = [column for column in curve_data if re.match(r"mppt_\d+_voltage_v", column)]
+            if mppt_current_columns or mppt_voltage_columns:
+                chart_left, chart_right = st.columns(2)
+                for target, columns, value_name, title, unit in (
+                    (chart_left, mppt_current_columns, "current", "Corrente por MPPT", "Corrente (A)"),
+                    (chart_right, mppt_voltage_columns, "voltage", "Tensão por MPPT", "Tensão (V)"),
+                ):
+                    if not columns:
+                        continue
+                    melted = curve_data[["timestamp", *columns]].melt("timestamp", var_name="mppt", value_name=value_name)
+                    melted["mppt"] = melted["mppt"].str.extract(r"mppt_(\d+)")[0].map(lambda value: f"MPPT {value}")
+                    chart = (
+                        alt.Chart(melted)
+                        .mark_line(strokeWidth=2)
+                        .encode(
+                            x=alt.X("timestamp:T", title=None, axis=alt.Axis(format="%Hh")),
+                            y=alt.Y(f"{value_name}:Q", title=unit),
+                            color=alt.Color("mppt:N", title=None, legend=alt.Legend(orient="top")),
+                            tooltip=[alt.Tooltip("timestamp:T", format="%H:%M"), "mppt:N", alt.Tooltip(f"{value_name}:Q", format=".2f")],
+                        )
+                        .properties(height=270, title=title)
+                    )
+                    target.altair_chart(chart)
+
+            with st.expander("Curvas elétricas e térmicas", icon=":material/electric_meter:"):
+                auxiliary_groups = [
+                    (["daily_energy_kwh"], "Energia acumulada no dia", "Energia (kWh)"),
+                    ([column for column in curve_data if column == "grid_voltage_v" or re.match(r"phase_[abc]_voltage_v", column)], "Tensões da rede", "Tensão (V)"),
+                    (["frequency_hz"], "Frequência da rede", "Frequência (Hz)"),
+                    ([column for column in ("heatsink_temp_c", "internal_temp_c") if column in curve_data], "Temperaturas", "Temperatura (°C)"),
+                    (["insulation_kohm"], "Resistência de isolamento", "Isolamento (kΩ)"),
+                    (["leakage_ma"], "Corrente de fuga", "Fuga (mA)"),
+                ]
+                available_groups = [(columns, title, unit) for columns, title, unit in auxiliary_groups if any(column in curve_data for column in columns)]
+                for group_index in range(0, len(available_groups), 2):
+                    group_columns = st.columns(2)
+                    for target, (columns, title, unit) in zip(group_columns, available_groups[group_index:group_index + 2]):
+                        columns = [column for column in columns if column in curve_data]
+                        chart_data = curve_data[["timestamp", *columns]].melt("timestamp", var_name="series", value_name="value")
+                        labels = {
+                            "daily_energy_kwh": "Geração do dia",
+                            "grid_voltage_v": "Tensão monitorada",
+                            "frequency_hz": "Frequência",
+                            "heatsink_temp_c": "Inversor / radiador",
+                            "internal_temp_c": "Interna",
+                            "insulation_kohm": "Isolamento",
+                            "leakage_ma": "Fuga",
+                            "phase_a_voltage_v": "Fase A",
+                            "phase_b_voltage_v": "Fase B",
+                            "phase_c_voltage_v": "Fase C",
+                        }
+                        chart_data["series"] = chart_data["series"].map(lambda value: labels.get(value, value))
+                        chart = (
+                            alt.Chart(chart_data)
+                            .mark_line(strokeWidth=2)
+                            .encode(
+                                x=alt.X("timestamp:T", title=None, axis=alt.Axis(format="%Hh")),
+                                y=alt.Y("value:Q", title=unit, scale=alt.Scale(zero=False)),
+                                color=alt.Color("series:N", title=None, legend=alt.Legend(orient="top")),
+                                tooltip=[alt.Tooltip("timestamp:T", format="%H:%M"), "series:N", alt.Tooltip("value:Q", format=".2f")],
+                            )
+                            .properties(height=230, title=title)
+                        )
+                        target.altair_chart(chart)
+
+            st.subheader("Diagnóstico técnico", icon=":material/troubleshoot:")
+            if curve_result["issues"]:
+                issue_df = pd.DataFrame(
+                    [
+                        {
+                            "Severidade": issue.severity,
+                            "Parâmetro": issue.parameter,
+                            "Evidência": issue.finding,
+                            "Possível causa": issue.possible_cause,
+                            "Próxima ação": issue.recommendation,
+                        }
+                        for issue in curve_result["issues"]
+                    ]
+                )
+                st.dataframe(issue_df, hide_index=True)
+                csv_download(issue_df, f"diagnostico-{summary['analysis_date']}.csv", "Baixar achados em CSV")
+            else:
+                st.info("Os limites avaliados não apontaram desvios evidentes. Continue comparando com clima, histórico e alarmes.")
+
+            with st.expander("Dados reconhecidos e prévia da planilha", icon=":material/table_view:"):
+                st.dataframe(curve_data.head(300), hide_index=True)
+                csv_download(curve_data, f"curva-normalizada-{summary['analysis_date']}.csv", "Baixar dados normalizados")
+
+            if st.button("Salvar análise no histórico", type="primary", icon=":material/save:", key=f"save_curve_{plant_id}_{uploaded_curve.name}"):
+                save_curve_analysis(plant_id, inverter_name, uploaded_curve.name, curve_result)
+                flash("Análise da curva salva no histórico da usina.")
+                st.rerun()
+        except CurveAnalysisError as exc:
+            st.error(str(exc), icon=":material/error:")
+        except Exception:
+            st.error("Não foi possível concluir a análise deste arquivo. Confira o mapeamento das colunas e tente novamente.")
+
+    st.divider()
+    st.subheader("Histórico de análises", icon=":material/history:")
+    curve_history = load_curve_history(plant_id)
+    if curve_history:
+        history_df = pd.DataFrame(curve_history).rename(
+            columns={
+                "analysis_date": "Data",
+                "inverter_name": "Inversor",
+                "source_filename": "Arquivo",
+                "sample_count": "Amostras",
+                "daily_energy_kwh": "Geração",
+                "peak_power_kw": "Pico",
+                "health_status": "Situação",
+                "issue_count": "Achados",
+                "created_at": "Salvo em",
+            }
+        )
+        st.dataframe(
+            history_df.drop(columns=["id"]),
+            hide_index=True,
+            column_config={
+                "Data": st.column_config.DateColumn(format="DD/MM/YYYY"),
+                "Geração": st.column_config.NumberColumn(format="%.2f kWh"),
+                "Pico": st.column_config.NumberColumn(format="%.2f kW"),
+                "Salvo em": st.column_config.DatetimeColumn(format="DD/MM/YYYY HH:mm"),
+            },
+        )
+        history_map = {
+            f"{row['analysis_date']} · {row.get('inverter_name') or 'Inversor'} · #{row['id']}": int(row["id"])
+            for row in curve_history
+        }
+        selected_history = st.selectbox("Análise para excluir", list(history_map), key=f"curve_history_delete_{plant_id}")
+        render_delete_control(
+            "inverter_curve_analysis",
+            history_map[selected_history],
+            f"análise {selected_history}",
+            state_keys=(f"curve_history_delete_{plant_id}",),
+        )
+    else:
+        st.caption("Nenhuma análise de Excel foi salva para esta usina.")
 
 with alarms_tab:
     alarms = load_equipment_alarms(plant_id)

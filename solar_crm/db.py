@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -387,6 +387,22 @@ CREATE TABLE IF NOT EXISTS equipment_alarms (
     UNIQUE(integration_id, external_id)
 );
 
+CREATE TABLE IF NOT EXISTS inverter_curve_analyses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plant_id INTEGER NOT NULL REFERENCES plants(id) ON DELETE CASCADE,
+    analysis_date TEXT NOT NULL,
+    inverter_name TEXT,
+    source_filename TEXT NOT NULL,
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    daily_energy_kwh REAL NOT NULL DEFAULT 0,
+    peak_power_kw REAL NOT NULL DEFAULT 0,
+    health_status TEXT NOT NULL DEFAULT 'Sem avaliação',
+    issue_count INTEGER NOT NULL DEFAULT 0,
+    summary_json TEXT NOT NULL DEFAULT '{}',
+    issues_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS plant_equipment (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     plant_id INTEGER NOT NULL REFERENCES plants(id) ON DELETE CASCADE,
@@ -748,6 +764,7 @@ CREATE INDEX IF NOT EXISTS idx_integration_sync_logs_started ON integration_sync
 CREATE INDEX IF NOT EXISTS idx_equipment_integrations_plant ON equipment_integrations(plant_id, status);
 CREATE INDEX IF NOT EXISTS idx_equipment_samples_time ON equipment_string_samples(integration_id, sample_at);
 CREATE INDEX IF NOT EXISTS idx_equipment_alarms_time ON equipment_alarms(integration_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_inverter_curve_plant_date ON inverter_curve_analyses(plant_id, analysis_date DESC);
 CREATE INDEX IF NOT EXISTS idx_plant_equipment_plant ON plant_equipment(plant_id, equipment_type);
 CREATE INDEX IF NOT EXISTS idx_plant_equipment_photos ON plant_equipment_photos(equipment_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date, status);
