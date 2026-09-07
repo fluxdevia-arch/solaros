@@ -61,6 +61,21 @@ class InverterCurveTests(unittest.TestCase):
         self.assertEqual(result["summary"]["peak_power_kw"], 3.0)
         self.assertIn("mppt_1_current_a", result["data"].columns)
 
+    def test_timestamp_is_inferred_from_cell_values_when_header_is_unknown(self):
+        from solar_crm.inverter_curve import analyze_inverter_curve
+
+        frame = pd.DataFrame(
+            {
+                "Medição cronológica": pd.date_range("2026-09-07 06:00", periods=4, freq="5min"),
+                "Active power(kW)": [0.2, 1.8, 3.4, 2.1],
+                "E-today(kWh)": [0.0, 0.1, 0.3, 0.5],
+            }
+        )
+        result = analyze_inverter_curve(workbook_bytes(frame), "vendor-export.xlsx")
+
+        self.assertEqual(result["summary"]["sample_count"], 4)
+        self.assertEqual(result["mapping"]["timestamp"], "Medição cronológica")
+
     def test_curve_history_can_be_saved_and_deleted(self):
         temp_root = Path(__file__).resolve().parents[1] / "tmp" / "tests"
         temp_root.mkdir(parents=True, exist_ok=True)

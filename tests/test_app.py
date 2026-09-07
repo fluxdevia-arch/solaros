@@ -16,6 +16,7 @@ ALL_PAGE_PATHS = [
     "app_pages/plants.py",
     "app_pages/readings.py",
     "app_pages/integrations.py",
+    "app_pages/inverter_diagnostics.py",
     "app_pages/equipment_analysis.py",
     "app_pages/operations.py",
     "app_pages/service_orders.py",
@@ -110,6 +111,24 @@ class StreamlitSmokeTest(unittest.TestCase):
                 os.environ.pop("SOLAROS_SEED_DEMO", None)
             else:
                 os.environ["SOLAROS_SEED_DEMO"] = previous_seed
+
+    def test_excel_diagnostics_has_report_identity_fields_and_is_not_duplicated(self):
+        app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        app = AppTest.from_file(app_path, default_timeout=20).run()
+
+        app.switch_page("app_pages/inverter_diagnostics.py").run()
+        self.assertFalse(app.exception)
+        text_labels = {widget.label for widget in app.text_input}
+        self.assertIn("Nome do cliente", text_labels)
+        self.assertIn("Documento do cliente", text_labels)
+        self.assertIn("Endereço da instalação", text_labels)
+        self.assertIn("Nome da usina / instalação", text_labels)
+        self.assertIn("Modelo / identificação do inversor", text_labels)
+        self.assertEqual(len(app.file_uploader), 1)
+
+        app.switch_page("app_pages/equipment_analysis.py").run()
+        self.assertFalse(app.exception)
+        self.assertEqual(len(app.file_uploader), 0)
 
     def test_client_full_profile_can_be_edited(self):
         from solar_crm.db import query_one

@@ -194,6 +194,40 @@ def _analysis_date(filename: str, fallback: date | None) -> date:
     return fallback or date.today()
 
 
+def _infer_timestamp_column(raw: pd.DataFrame) -> str | None:
+    """Find a date/time column by its values when a portal uses an unknown header."""
+    best_column: str | None = None
+    best_score = 0.0
+    for column in raw.columns:
+        sample = raw[column].dropna().head(200)
+        if sample.empty:
+            continue
+        if pd.api.types.is_datetime64_any_dtype(sample):
+            return str(column)
+        if pd.api.types.is_numeric_dtype(sample):
+            continue
+        text = sample.astype(str).str.strip()
+        looks_temporal = text.str.match(
+            r"^(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}:\d{2})"
+        )
+        candidate = text.loc[looks_temporal]
+        if candidate.empty:
+            continue
+        parsed = candidate.map(
+            lambda value: pd.to_datetime(
+                value,
+                errors="coerce",
+                yearfirst=bool(re.match(r"^20\d{2}[-/]", value)),
+                dayfirst=not bool(re.match(r"^20\d{2}[-/]", value)),
+            )
+        )
+        score = float(parsed.notna().sum()) / float(len(sample))
+        if score > best_score:
+            best_score = score
+            best_column = str(column)
+    return best_column if best_score >= 0.6 else None
+
+
 def _timestamps(series: pd.Series, day: date) -> pd.Series:
     def parse(value: object) -> pd.Timestamp | pd.NaT:
         if pd.isna(value):
@@ -242,7 +276,11 @@ def analyze_inverter_curve(
     mapping = {**auto_mapping, **(column_mapping or {})}
     mapping = {key: value for key, value in mapping.items() if value in raw.columns and value}
     if "timestamp" not in mapping:
-        raise CurveAnalysisError("Não identifiquei a coluna de data/hora. Selecione-a no mapeamento manual.")
+        inferred_timestamp = _infer_timestamp_column(raw)
+        if inferred_timestamp:
+            mapping["timestamp"] = inferred_timestamp
+        else:
+            raise CurveAnalysisError("Não identifiquei a coluna de data/hora. Selecione-a no mapeamento manual.")
     if not ({"active_power_kw", "pv_power_kw"} & mapping.keys()):
         raise CurveAnalysisError("Não identifiquei uma coluna de potência ativa ou potência FV. Faça o mapeamento manual.")
 
