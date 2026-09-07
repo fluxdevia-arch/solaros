@@ -5,6 +5,8 @@ import json
 import streamlit as st
 
 from solar_crm.inspection_documents import generate_inspection_pdf
+from solar_crm.curve_documents import generate_inverter_curve_pdf
+from solar_crm.inverter_curve import analyze_inverter_curve
 from solar_crm.proposal_documents import generate_proposal_pdf
 from solar_crm.service_documents import generate_service_contract_pdf, generate_service_order_pdf
 from solar_crm.sizing_documents import generate_general_sizing_pdf, generate_special_sizing_pdf
@@ -40,6 +42,28 @@ def general_sizing_pdf(memorial: str, document_version: str) -> bytes:
     return generate_general_sizing_pdf(memorial)
 
 
+@st.cache_data(ttl="10m", max_entries=32, show_spinner=False)
+def inverter_curve_pdf(
+    plant_id: int,
+    inverter_name: str,
+    source_filename: str,
+    file_bytes: bytes,
+    sheet_name: str,
+    mapping_json: str,
+    nominal_power_kw: float,
+    nominal_grid_voltage_v: float,
+) -> bytes:
+    result = analyze_inverter_curve(
+        file_bytes,
+        source_filename,
+        sheet_name=sheet_name,
+        column_mapping=json.loads(mapping_json),
+        nominal_power_kw=nominal_power_kw,
+        nominal_grid_voltage_v=nominal_grid_voltage_v,
+    )
+    return generate_inverter_curve_pdf(plant_id, inverter_name, source_filename, result)
+
+
 def clear_document_caches() -> None:
     """Invalidate branded documents after company identity changes."""
     inspection_pdf.clear()
@@ -48,3 +72,4 @@ def clear_document_caches() -> None:
     service_contract_pdf.clear()
     special_sizing_pdf.clear()
     general_sizing_pdf.clear()
+    inverter_curve_pdf.clear()

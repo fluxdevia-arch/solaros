@@ -88,6 +88,46 @@ class InverterCurveTests(unittest.TestCase):
                 os.environ["SOLAR_CRM_DB"] = previous_db
             db_path.unlink(missing_ok=True)
 
+    def test_pdf_contains_charts_findings_and_technical_signature(self):
+        temp_root = Path(__file__).resolve().parents[1] / "tmp" / "tests"
+        temp_root.mkdir(parents=True, exist_ok=True)
+        db_path = temp_root / f"curve-pdf-{uuid.uuid4().hex}.db"
+        previous_db = os.environ.get("SOLAR_CRM_DB")
+        os.environ["SOLAR_CRM_DB"] = str(db_path)
+        try:
+            from pypdf import PdfReader
+
+            from solar_crm.curve_documents import generate_inverter_curve_pdf
+            from solar_crm.db import execute, init_db
+            from solar_crm.inverter_curve import analyze_inverter_curve
+
+            init_db(seed=False)
+            client_id = execute("INSERT INTO clients (name, status) VALUES ('Cliente PDF', 'Ativo')")
+            plant_id = execute("INSERT INTO plants (client_id, name, unit_code) VALUES (?, 'Usina PDF', 'UC-01')", (client_id,))
+            frame = pd.DataFrame({
+                "Data (HH:mm)": ["08:00", "09:00", "10:00", "11:00", "12:00"],
+                "Potência Ativa(kW)": [0.2, 2.0, 4.2, 3.8, 1.5],
+                "Geração Hoje(kWh)": [0.1, 1.2, 3.5, 6.8, 8.5],
+                "Corrente MPPT1(A)": [1, 5, 9, 8, 4],
+                "Tensão MPPT1(V)": [300, 320, 330, 325, 315],
+                "Temperatura interna(°C)": [35, 45, 55, 78, 62],
+            })
+            result = analyze_inverter_curve(workbook_bytes(frame), "curva-2026-09-06.xlsx")
+            pdf = generate_inverter_curve_pdf(plant_id, "INV-01", "curva.xlsx", result)
+            reader = PdfReader(BytesIO(pdf))
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            self.assertGreaterEqual(len(reader.pages), 3)
+            self.assertIn("Relatório técnico de curva do inversor", text)
+            self.assertIn("Comportamento dos MPPTs", text)
+            self.assertIn("Diagnóstico e recomendações", text)
+            self.assertIn("Carlos Jessé Soares", text)
+        finally:
+            if previous_db is None:
+                os.environ.pop("SOLAR_CRM_DB", None)
+            else:
+                os.environ["SOLAR_CRM_DB"] = previous_db
+            db_path.unlink(missing_ok=True)
+
 
 if __name__ == "__main__":
     unittest.main()

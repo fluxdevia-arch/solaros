@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, datetime
 
@@ -8,6 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from solar_crm.calculations import number_br
+from solar_crm.document_cache import inverter_curve_pdf
 from solar_crm.db import query
 from solar_crm.equipment_analysis import (
     AUTH_TYPES,
@@ -32,6 +34,25 @@ from solar_crm.inverter_curve import (
     workbook_preview,
 )
 from solar_crm.ui import csv_download, empty_state, flash, page_intro, render_delete_control, show_flash, status_badge
+
+
+@st.cache_data(ttl="1h", max_entries=24, show_spinner=False)
+def _cached_curve_analysis(
+    file_bytes: bytes,
+    filename: str,
+    sheet_name: str,
+    mapping_json: str,
+    nominal_power_kw: float,
+    nominal_grid_voltage_v: float,
+):
+    return analyze_inverter_curve(
+        file_bytes,
+        filename,
+        sheet_name=sheet_name,
+        column_mapping=json.loads(mapping_json),
+        nominal_power_kw=nominal_power_kw,
+        nominal_grid_voltage_v=nominal_grid_voltage_v,
+    )
 
 
 page_intro(
@@ -429,13 +450,14 @@ with excel_tab:
             )
 
             with st.spinner("Lendo curvas e avaliando possíveis anomalias..."):
-                curve_result = analyze_inverter_curve(
+                mapping_json = json.dumps(manual_mapping, ensure_ascii=False, sort_keys=True)
+                curve_result = _cached_curve_analysis(
                     file_bytes,
                     uploaded_curve.name,
-                    sheet_name=selected_sheet,
-                    column_mapping=manual_mapping,
-                    nominal_power_kw=float(nominal_power),
-                    nominal_grid_voltage_v=float(nominal_voltage),
+                    selected_sheet,
+                    mapping_json,
+                    float(nominal_power),
+                    float(nominal_voltage),
                 )
             summary = curve_result["summary"]
             status = summary["health_status"]
@@ -564,6 +586,29 @@ with excel_tab:
             with st.expander("Dados reconhecidos e prévia da planilha", icon=":material/table_view:"):
                 st.dataframe(curve_data.head(300), hide_index=True)
                 csv_download(curve_data, f"curva-normalizada-{summary['analysis_date']}.csv", "Baixar dados normalizados")
+
+            try:
+                curve_pdf = inverter_curve_pdf(
+                    plant_id,
+                    inverter_name,
+                    uploaded_curve.name,
+                    file_bytes,
+                    selected_sheet,
+                    mapping_json,
+                    float(nominal_power),
+                    float(nominal_voltage),
+                )
+                st.download_button(
+                    "Baixar relatório técnico em PDF",
+                    data=curve_pdf,
+                    file_name=f"relatorio-curva-inversor-{summary['analysis_date']}.pdf",
+                    mime="application/pdf",
+                    icon=":material/picture_as_pdf:",
+                    type="primary",
+                    key=f"curve_pdf_{plant_id}_{uploaded_curve.name}",
+                )
+            except Exception:
+                st.error("A análise foi concluída, mas não foi possível montar o PDF. Atualize a página e tente novamente.")
 
             if st.button("Salvar análise no histórico", type="primary", icon=":material/save:", key=f"save_curve_{plant_id}_{uploaded_curve.name}"):
                 save_curve_analysis(plant_id, inverter_name, uploaded_curve.name, curve_result)
