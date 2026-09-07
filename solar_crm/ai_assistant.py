@@ -19,7 +19,7 @@ from solar_crm.inverter_curve import CurveAnalysisError, analyze_inverter_curve
 
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
-GEMINI_GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+GEMINI_INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
 SUPPORTED_EXTENSIONS = {".xlsx", ".csv", ".pdf", ".docx", ".txt", ".md", ".jpg", ".jpeg", ".png", ".webp"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024
@@ -236,20 +236,27 @@ def ask_assistant(
     )
     client = session or requests.Session()
     if provider == "gemini":
-        parts: list[dict[str, Any]] = [{"text": input_text}]
+        parts: list[dict[str, Any]] = [{"type": "text", "text": input_text}]
         for item in images:
             encoded = item["data_url"].split(",", 1)[-1]
-            parts.append({"inlineData": {"mimeType": item["mime_type"], "data": encoded}})
+            parts.append(
+                {
+                    "type": "image",
+                    "mime_type": item["mime_type"],
+                    "data": encoded,
+                }
+            )
         payload = {
-            "systemInstruction": {"parts": [{"text": _assistant_instructions()}]},
-            "contents": [{"role": "user", "parts": parts}],
-            "generationConfig": {
-                "maxOutputTokens": 2000,
-                "thinkingConfig": {"thinkingLevel": "low"},
+            "model": model,
+            "system_instruction": _assistant_instructions(),
+            "input": parts,
+            "generation_config": {
+                "max_output_tokens": 2000,
+                "thinking_level": "low",
             },
             "store": False,
         }
-        url = GEMINI_GENERATE_URL.format(model=model)
+        url = GEMINI_INTERACTIONS_URL
         headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
     else:
         content: list[dict[str, Any]] = [{"type": "input_text", "text": input_text}]
@@ -279,8 +286,8 @@ def ask_assistant(
         raise AssistantError(f"A chave da API é inválida. Confira o segredo {secret_name} no Streamlit.")
     if response.status_code == 403 and provider == "gemini":
         raise AssistantError(
-            "O Google reconheceu a chave, mas negou a permissão. No Google AI Studio, crie uma nova chave "
-            "do tipo Auth, restrita à Gemini API, aceite os termos e substitua GEMINI_API_KEY no Streamlit."
+            "O projeto do Google negou acesso à Gemini API. Confirme no Google AI Studio se a chave é do tipo "
+            "Auth, se os termos foram aceitos e se a Gemini API está permitida nas restrições dessa chave."
         )
     if response.status_code == 403:
         raise AssistantError("A OpenAI reconheceu a chave, mas ela não tem permissão para usar esse recurso.")
@@ -296,16 +303,17 @@ def ask_assistant(
         body = response.json()
         if provider == "gemini":
             answer = "\n".join(
-                part.get("text", "")
-                for candidate in body.get("candidates", [])
-                for part in candidate.get("content", {}).get("parts", [])
-                if part.get("text")
+                block.get("text", "")
+                for step in body.get("steps", [])
+                if step.get("type") == "model_output"
+                for block in step.get("content", [])
+                if block.get("type") == "text" and block.get("text")
             ).strip()
-            raw_usage = body.get("usageMetadata") or {}
+            raw_usage = body.get("usage") or {}
             usage = {
-                "input_tokens": int(raw_usage.get("promptTokenCount") or 0),
-                "output_tokens": int(raw_usage.get("candidatesTokenCount") or 0),
-                "total_tokens": int(raw_usage.get("totalTokenCount") or 0),
+                "input_tokens": int(raw_usage.get("total_input_tokens") or 0),
+                "output_tokens": int(raw_usage.get("total_output_tokens") or 0),
+                "total_tokens": int(raw_usage.get("total_tokens") or 0),
             }
         else:
             answer = "\n".join(

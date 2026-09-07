@@ -24,10 +24,13 @@ provider_label = "Gemini" if provider == "gemini" else "OpenAI"
 st.session_state.setdefault("ai_messages", [])
 st.session_state.setdefault("ai_attachments", [])
 st.session_state.setdefault("ai_usage", {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+st.session_state.setdefault("ai_connection_verified", False)
 
 with st.container(horizontal=True, vertical_alignment="center"):
-    if api_key:
+    if api_key and st.session_state.ai_connection_verified:
         st.success(f"Assistente conectado ao {provider_label} · modelo {model}", icon=":material/cloud_done:")
+    elif api_key:
+        st.info(f"Chave do {provider_label} configurada · conexão aguardando validação", icon=":material/key:")
     else:
         st.warning("Assistente preparado, aguardando a chave da API.", icon=":material/key:")
     if st.button("Nova conversa", icon=":material/refresh:", key="ai_new_conversation"):
@@ -140,10 +143,12 @@ if submission:
                         provider=provider,
                     )
                     st.markdown(answer)
+                    st.session_state.ai_connection_verified = True
                     st.session_state.ai_messages.append({"role": "assistant", "content": answer})
                     for key in st.session_state.ai_usage:
                         st.session_state.ai_usage[key] += usage.get(key, 0)
                 except AssistantError as exc:
+                    st.session_state.ai_connection_verified = False
                     st.error(str(exc), icon=":material/error:")
 
 usage = st.session_state.ai_usage

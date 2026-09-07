@@ -29,13 +29,17 @@ class _GeminiResponse:
 
     def json(self):
         return {
-            "candidates": [
-                {"content": {"parts": [{"text": "Possível aquecimento; confirme por termografia."}]}}
+            "status": "completed",
+            "steps": [
+                {
+                    "type": "model_output",
+                    "content": [{"type": "text", "text": "Possível aquecimento; confirme por termografia."}],
+                }
             ],
-            "usageMetadata": {
-                "promptTokenCount": 90,
-                "candidatesTokenCount": 20,
-                "totalTokenCount": 110,
+            "usage": {
+                "total_input_tokens": 90,
+                "total_output_tokens": 20,
+                "total_tokens": 110,
             },
         }
 
@@ -120,15 +124,17 @@ class AiAssistantTests(unittest.TestCase):
 
         self.assertIn("termografia", answer)
         self.assertEqual(usage["total_tokens"], 110)
-        self.assertIn("generativelanguage.googleapis.com", session.request["url"])
+        self.assertEqual(session.request["url"], "https://generativelanguage.googleapis.com/v1beta/interactions")
         self.assertEqual(session.request["headers"]["x-goog-api-key"], "gemini-test-key")
         payload = session.request["json"]
-        self.assertIn("systemInstruction", payload)
-        self.assertTrue(any("inlineData" in part for part in payload["contents"][0]["parts"]))
+        self.assertEqual(payload["model"], "gemini-3.7-flash")
+        self.assertIn("system_instruction", payload)
+        self.assertTrue(any(part.get("type") == "text" for part in payload["input"]))
+        self.assertTrue(any(part.get("type") == "image" for part in payload["input"]))
         self.assertNotIn("gemini-test-key", str(payload))
 
-    def test_gemini_permission_error_explains_auth_key_requirement(self):
-        with self.assertRaisesRegex(AssistantError, "nova chave.*tipo Auth"):
+    def test_gemini_permission_error_explains_project_access(self):
+        with self.assertRaisesRegex(AssistantError, "projeto do Google.*tipo Auth"):
             ask_assistant(
                 "standard-key",
                 "gemini-3.7-flash",
