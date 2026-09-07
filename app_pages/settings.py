@@ -147,6 +147,7 @@ with right:
         - Identidade white-label por empresa (nome e logotipo)
         - Login individual por e-mail e senha
         - PostgreSQL em nuvem com migração do banco local
+        - Assistente SolarOS com chat, planilhas, documentos e análise visual de fotos
         """)
         st.caption("Próximas integrações possíveis: leitura automática de faturas e envio por WhatsApp/e-mail.")
 

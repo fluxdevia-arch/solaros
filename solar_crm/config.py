@@ -52,6 +52,20 @@ def encryption_key() -> str:
     return str(setting("SOLAROS_ENCRYPTION_KEY", default="") or "").strip()
 
 
+def openai_api_key() -> str:
+    environment_value = os.getenv("OPENAI_API_KEY", "").strip()
+    if environment_value:
+        return environment_value
+    return str(_streamlit_secret("openai", "api_key") or "").strip()
+
+
+def openai_model() -> str:
+    environment_value = os.getenv("OPENAI_MODEL", "").strip()
+    if environment_value:
+        return environment_value
+    return str(_streamlit_secret("openai", "model") or "gpt-5-mini").strip()
+
+
 def allowed_emails() -> set[str]:
     configured = setting("SOLAROS_ALLOWED_EMAILS", default=[])
     if isinstance(configured, str):
