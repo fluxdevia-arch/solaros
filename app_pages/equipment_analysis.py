@@ -460,6 +460,7 @@ with excel_tab:
                     float(nominal_voltage),
                 )
             summary = curve_result["summary"]
+            is_period_analysis = int(summary.get("day_count") or 1) > 1
             status = summary["health_status"]
             if status == "Crítica":
                 st.error("Foram encontrados indícios que exigem verificação prioritária.", icon=":material/error:")
@@ -470,7 +471,8 @@ with excel_tab:
 
             with st.container(horizontal=True):
                 st.metric("Situação", status, border=True)
-                st.metric("Geração do dia", f"{number_br(summary['daily_energy_kwh'], 2)} kWh", border=True)
+                generation_label = "Geração do período" if is_period_analysis else "Geração do dia"
+                st.metric(generation_label, f"{number_br(summary['daily_energy_kwh'], 2)} kWh", border=True)
                 st.metric("Pico de potência", f"{number_br(summary['peak_power_kw'], 2)} kW", border=True)
                 st.metric("Tempo em operação", f"{number_br(summary['operating_hours'], 1)} h", border=True)
                 st.metric("Amostras válidas", summary["sample_count"], border=True)
@@ -488,12 +490,19 @@ with excel_tab:
                     alt.Chart(power_chart_data)
                     .mark_line(strokeWidth=2.5)
                     .encode(
-                        x=alt.X("timestamp:T", title=None, axis=alt.Axis(format="%H:%M")),
+                        x=alt.X(
+                            "timestamp:T",
+                            title=None,
+                            axis=alt.Axis(format="%d/%m" if is_period_analysis else "%H:%M"),
+                        ),
                         y=alt.Y("power_kw:Q", title="Potência (kW)"),
                         color=alt.Color("series:N", title=None, legend=alt.Legend(orient="top")),
                         tooltip=[alt.Tooltip("timestamp:T", title="Horário", format="%H:%M"), "series:N", alt.Tooltip("power_kw:Q", title="kW", format=".2f")],
                     )
-                    .properties(height=330, title="Curva de potência do dia")
+                    .properties(
+                        height=330,
+                        title="Curva de potência do período" if is_period_analysis else "Curva de potência do dia",
+                    )
                     .interactive(bind_y=False)
                 )
                 st.altair_chart(power_chart)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import streamlit as st
 
@@ -44,7 +45,7 @@ def general_sizing_pdf(memorial: str, document_version: str) -> bytes:
 
 @st.cache_data(ttl="10m", max_entries=32, show_spinner=False)
 def inverter_curve_pdf(
-    plant_id: int,
+    plant_id: int | None,
     inverter_name: str,
     source_filename: str,
     file_bytes: bytes,
@@ -52,6 +53,8 @@ def inverter_curve_pdf(
     mapping_json: str,
     nominal_power_kw: float,
     nominal_grid_voltage_v: float,
+    selected_day: str = "",
+    report_context_json: str = "{}",
 ) -> bytes:
     result = analyze_inverter_curve(
         file_bytes,
@@ -60,8 +63,15 @@ def inverter_curve_pdf(
         column_mapping=json.loads(mapping_json),
         nominal_power_kw=nominal_power_kw,
         nominal_grid_voltage_v=nominal_grid_voltage_v,
+        selected_day=date.fromisoformat(selected_day) if selected_day else None,
     )
-    return generate_inverter_curve_pdf(plant_id, inverter_name, source_filename, result)
+    return generate_inverter_curve_pdf(
+        plant_id,
+        inverter_name,
+        source_filename,
+        result,
+        report_context=json.loads(report_context_json),
+    )
 
 
 def clear_document_caches() -> None:

@@ -97,7 +97,8 @@ def _line_chart(data: pd.DataFrame, fields: list[str], title: str, unit: str, *,
     for index in range(5):
         x = left + plot_width * index / 4
         timestamp = start + (end - start) * (index / 4)
-        drawing.add(String(x, bottom - 13, timestamp.strftime("%H:%M"), fontName="Helvetica", fontSize=6.2, fillColor=MUTED, textAnchor="middle"))
+        tick_label = timestamp.strftime("%d/%m") if (end - start).days >= 2 else timestamp.strftime("%H:%M")
+        drawing.add(String(x, bottom - 13, tick_label, fontName="Helvetica", fontSize=6.2, fillColor=MUTED, textAnchor="middle"))
 
     for series_index, field in enumerate(fields):
         numeric = pd.to_numeric(data[field], errors="coerce")
@@ -114,6 +115,35 @@ def _line_chart(data: pd.DataFrame, fields: list[str], title: str, unit: str, *,
             legend_x = left + series_index * (plot_width / max(len(fields), 1))
             drawing.add(Line(legend_x, height - 25, legend_x + 14, height - 25, strokeColor=color, strokeWidth=2))
             drawing.add(String(legend_x + 18, height - 28, _series_label(field), fontName="Helvetica", fontSize=6.8, fillColor=DARK))
+    drawing.add(String(2, bottom + plot_height / 2, unit, fontName="Helvetica", fontSize=6.3, fillColor=MUTED, angle=90))
+    return drawing
+
+
+def _daily_bar_chart(daily: pd.DataFrame, field: str, title: str, unit: str) -> Drawing:
+    width, height = 490, 190
+    left, right, bottom, top = 46, 14, 31, 31
+    plot_width = width - left - right
+    plot_height = height - bottom - top
+    drawing = Drawing(width, height)
+    drawing.add(String(0, height - 13, title, fontName="Helvetica-Bold", fontSize=9.2, fillColor=DARK))
+    values = pd.to_numeric(daily[field], errors="coerce").fillna(0)
+    dates = pd.to_datetime(daily["date"], errors="coerce")
+    maximum = max(float(values.max()) * 1.08, 1)
+    drawing.add(Rect(left, bottom, plot_width, plot_height, strokeColor=BORDER, fillColor=colors.white, strokeWidth=0.6))
+    for index in range(5):
+        y = bottom + plot_height * index / 4
+        value = maximum * index / 4
+        drawing.add(Line(left, y, left + plot_width, y, strokeColor=HexColor("#E7EEE9"), strokeWidth=0.35))
+        drawing.add(String(left - 5, y - 2.5, f"{value:.1f}", fontName="Helvetica", fontSize=6.2, fillColor=MUTED, textAnchor="end"))
+    count = max(len(values), 1)
+    slot = plot_width / count
+    bar_width = max(min(slot * 0.68, 12), 2)
+    for index, (timestamp, value) in enumerate(zip(dates, values)):
+        x = left + slot * index + (slot - bar_width) / 2
+        bar_height = float(value) / maximum * plot_height
+        drawing.add(Rect(x, bottom, bar_width, bar_height, strokeColor=None, fillColor=GREEN))
+        if index % max((count + 7) // 8, 1) == 0 or index == count - 1:
+            drawing.add(String(x + bar_width / 2, bottom - 13, timestamp.strftime("%d/%m"), fontName="Helvetica", fontSize=6, fillColor=MUTED, textAnchor="middle"))
     drawing.add(String(2, bottom + plot_height / 2, unit, fontName="Helvetica", fontSize=6.3, fillColor=MUTED, angle=90))
     return drawing
 
@@ -136,27 +166,44 @@ def _kpi(label: str, value: str, styles) -> Table:
 
 
 def generate_inverter_curve_pdf(
-    plant_id: int,
+    plant_id: int | None,
     inverter_name: str,
     source_filename: str,
     result: dict,
+    report_context: dict | None = None,
     save_path: str | Path | None = None,
 ) -> bytes:
     company = query_one("SELECT * FROM settings WHERE id=1") or {"company_name": "SolarOS", "legal_name": "SolarOS"}
-    plant = query_one(
-        """SELECT p.*, c.name AS client_name, c.document AS client_document
-           FROM plants p JOIN clients c ON c.id=p.client_id WHERE p.id=?""",
-        (plant_id,),
-    )
+    plant = None
+    if plant_id is not None:
+        plant = query_one(
+            """SELECT p.*, c.name AS client_name, c.document AS client_document,
+                      c.address AS client_address, c.city AS client_city, c.state AS client_state
+               FROM plants p JOIN clients c ON c.id=p.client_id WHERE p.id=?""",
+            (plant_id,),
+        )
+    if plant is None and report_context:
+        plant = {
+            "client_name": report_context.get("client_name") or "Cliente não cadastrado",
+            "client_document": report_context.get("client_document"),
+            "name": report_context.get("plant_name") or "Instalação analisada",
+            "unit_code": report_context.get("unit_code"),
+            "client_address": report_context.get("address"),
+            "client_city": "",
+            "client_state": "",
+            "installed_kwp": report_context.get("installed_kwp"),
+        }
     if not plant:
-        raise ValueError("Usina não encontrada para emitir o relatório.")
+        raise ValueError("Informe os dados da instalação ou selecione uma usina para emitir o relatório.")
 
     summary = result["summary"]
     data = result["data"].copy()
     issues = result["issues"]
     styles = _styles()
     buffer = BytesIO()
-    report_label = f"Diagnóstico do inversor - {summary['analysis_date']}"
+    is_period = int(summary.get("day_count") or 1) > 1
+    period_label = f"{date_br(summary.get('date_start'))} a {date_br(summary.get('date_end'))}" if is_period else date_br(summary["analysis_date"])
+    report_label = f"Diagnóstico do inversor - {period_label}"
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
@@ -164,34 +211,43 @@ def generate_inverter_curve_pdf(
         leftMargin=1.45 * cm,
         topMargin=1.2 * cm,
         bottomMargin=1.75 * cm,
-        title=f"Relatório de curva do inversor - {plant['name']} - {summary['analysis_date']}",
+        title=f"Relatório de curva do inversor - {plant['name']} - {period_label}",
         author=company["company_name"],
     )
     story = _header(
         company,
-        "Relatório técnico de curva do inversor",
-        "Análise automática de telemetria diária exportada pelo portal de monitoramento",
+        f"Relatório técnico de análise {'mensal / período' if is_period else 'diária'}",
+        "Diagnóstico automático de telemetria exportada pelo portal de monitoramento",
         styles,
     )
+    report_context = report_context or {}
+    inverter_description = " · ".join(filter(None, [report_context.get("inverter_brand"), inverter_name])) or inverter_name
+    system_description = " · ".join(filter(None, [
+        f"{report_context.get('installed_kwp'):g} kWp" if report_context.get("installed_kwp") else None,
+        f"{int(report_context.get('module_count'))} módulos" if report_context.get("module_count") else None,
+        f"{report_context.get('module_power_wp'):g} Wp/módulo" if report_context.get("module_power_wp") else None,
+    ])) or "Não informado"
+    address = report_context.get("address") or plant.get("client_address") or "-"
     story.append(_info_table([
         ["CLIENTE", plant["client_name"], "DOCUMENTO", plant.get("client_document")],
         ["USINA", plant["name"], "UNIDADE CONSUMIDORA", plant.get("unit_code")],
-        ["INVERSOR", inverter_name, "DATA ANALISADA", date_br(summary["analysis_date"])],
+        ["INVERSOR", inverter_description, "PERÍODO ANALISADO", period_label],
+        ["SISTEMA FV", system_description, "ENDEREÇO", address],
         ["ARQUIVO DE ORIGEM", source_filename, "PLANILHA", summary.get("sheet")],
     ], styles, [2.55 * cm, 6.05 * cm, 2.75 * cm, 5.85 * cm]))
     story += [Spacer(1, 0.35 * cm), Paragraph("Resumo executivo", styles["DocSection"])]
     first_operation = pd.to_datetime(summary.get("first_operation"), errors="coerce")
     last_operation = pd.to_datetime(summary.get("last_operation"), errors="coerce")
-    operation_window = "-"
-    if not pd.isna(first_operation) and not pd.isna(last_operation):
+    operation_window = period_label if is_period else "-"
+    if not is_period and not pd.isna(first_operation) and not pd.isna(last_operation):
         operation_window = f"{first_operation.strftime('%H:%M')} a {last_operation.strftime('%H:%M')}"
     kpis = [
         _kpi("Situação", summary["health_status"], styles),
-        _kpi("Geração do dia", f"{number_br(summary['daily_energy_kwh'], 2)} kWh", styles),
+        _kpi("Geração do período" if is_period else "Geração do dia", f"{number_br(summary['period_energy_kwh'], 2)} kWh", styles),
         _kpi("Pico de potência", f"{number_br(summary['peak_power_kw'], 2)} kW", styles),
         _kpi("Operação estimada", f"{number_br(summary['operating_hours'], 1)} h", styles),
-        _kpi("Janela produtiva", operation_window, styles),
-        _kpi("Amostras / achados", f"{summary['sample_count']} / {summary['issue_count']}", styles),
+        _kpi("Período" if is_period else "Janela produtiva", operation_window, styles),
+        _kpi("Dias / amostras", f"{summary.get('day_count', 1)} / {summary['sample_count']}", styles),
     ]
     story.append(Table([kpis[:3], kpis[3:]], colWidths=[5.72 * cm] * 3, style=TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -209,15 +265,25 @@ def generate_inverter_curve_pdf(
     )
     story += [Spacer(1, 0.18 * cm), Paragraph(conclusion, styles["DocBody"])]
 
+    if is_period and not result.get("daily_summary", pd.DataFrame()).empty:
+        daily = result["daily_summary"]
+        story += [Paragraph("Produção consolidada", styles["DocSection"]), _daily_bar_chart(daily, "energy_kwh", "Geração por dia", "kWh")]
+        story.append(_line_chart(daily.rename(columns={"date": "timestamp"}), ["peak_power_kw"], "Pico de potência por dia", "kW", zero=True))
+        story.append(Paragraph(
+            f"Média diária: <b>{number_br(summary.get('average_daily_energy_kwh'), 2)} kWh</b>. "
+            f"Melhor dia: <b>{date_br(summary.get('best_day'))}</b>, com <b>{number_br(summary.get('best_day_energy_kwh'), 2)} kWh</b>. "
+            f"Variação do contador total: <b>{number_br(summary.get('total_counter_delta_kwh'), 1)} kWh</b>.",
+            styles["DocBody"],
+        ))
     power_fields = [field for field in ("active_power_kw", "pv_power_kw") if field in data]
-    story += [Paragraph("Curva principal", styles["DocSection"]), _line_chart(data, power_fields, "Potência ao longo do dia", "kW", zero=True)]
-    if "daily_energy_kwh" in data:
+    story += [PageBreak(), Paragraph("Curvas de potência e energia", styles["DocTitle"]), _line_chart(data, power_fields, "Potência ao longo do período" if is_period else "Potência ao longo do dia", "kW", zero=True)]
+    if "daily_energy_kwh" in data and not is_period:
         story += [_line_chart(data, ["daily_energy_kwh"], "Energia acumulada", "kWh", zero=True)]
 
     current_fields = sorted(field for field in data if re.match(r"mppt_\d+_current_a", field))
     voltage_fields = sorted(field for field in data if re.match(r"mppt_\d+_voltage_v", field))
     if current_fields or voltage_fields:
-        story += [PageBreak(), Paragraph("Comportamento dos MPPTs", styles["DocTitle"])]
+        story += [PageBreak(), Paragraph("Comportamento dos MPPTs / entradas CC", styles["DocTitle"])]
         if current_fields:
             story.append(_line_chart(data, current_fields, "Corrente por MPPT", "A", zero=True))
         if voltage_fields:
@@ -241,14 +307,43 @@ def generate_inverter_curve_pdf(
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ]))
             story += [Spacer(1, 0.15 * cm), mppt_table]
+    string_summary = result.get("string_summary") or []
+    coverage = result.get("coverage") or {}
+    story += [Paragraph("Disponibilidade dos canais", styles["DocSection"])]
+    story.append(_info_table([
+        ["COLUNAS DO ARQUIVO", coverage.get("source_column_count"), "COLUNAS IDENTIFICADAS", coverage.get("mapped_column_count")],
+        ["ENTRADAS CC / MPPT", f"{coverage.get('mppts_with_values', 0)} com dados de {coverage.get('recognized_mppts', 0)} detectadas", "STRINGS", f"{coverage.get('string_channels_with_values', 0)} com dados de {coverage.get('recognized_string_channels', 0)} detectadas"],
+    ], styles, [3.25 * cm, 5.35 * cm, 3.25 * cm, 5.35 * cm]))
+    if string_summary:
+        string_rows = [[Paragraph("STRING", styles["DocLabel"]), Paragraph("CORRENTE MÉDIA", styles["DocLabel"]), Paragraph("CORRENTE MÁXIMA", styles["DocLabel"]), Paragraph("AMOSTRAS", styles["DocLabel"])]]
+        for item in string_summary:
+            string_rows.append([
+                Paragraph(_safe(item["string"]), styles["DocValue"]),
+                Paragraph(f"{number_br(item['mean_current_a'], 2)} A", styles["DocRight"]),
+                Paragraph(f"{number_br(item['peak_current_a'], 2)} A", styles["DocRight"]),
+                Paragraph(str(item["samples"]), styles["DocRight"]),
+            ])
+        string_table = LongTable(string_rows, colWidths=[4.3 * cm] * 4, repeatRows=1)
+        string_table.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.5, BORDER), ("INNERGRID", (0, 0), (-1, -1), 0.25, BORDER), ("BACKGROUND", (0, 0), (-1, 0), PALE), ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+        story += [Spacer(1, 0.15 * cm), string_table]
+    elif coverage.get("recognized_string_channels"):
+        story.append(Paragraph(
+            f"O arquivo contém {coverage['recognized_string_channels']} cabeçalhos de corrente por string, porém sem nenhum valor preenchido. "
+            "Por isso não é tecnicamente possível desenhar curvas individuais de strings com este arquivo; as entradas CC/MPPT que possuem valores foram analisadas normalmente.",
+            styles["DocBody"],
+        ))
 
     auxiliary = [
-        ([field for field in data if field == "grid_voltage_v" or re.match(r"phase_[abc]_voltage_v", field)], "Tensão da rede", "V", False),
+        ([field for field in data if field == "grid_voltage_v" or re.match(r"phase_[abc]_voltage_v", field)], "Tensões de fase", "V", False),
+        ([field for field in data if re.match(r"phase_[abc]_current_a", field)], "Correntes de fase", "A", True),
+        ([field for field in data if re.match(r"line_(rs|rt|st|ab|ac|bc)_voltage_v", field)], "Tensões entre fases", "V", False),
         (["frequency_hz"], "Frequência da rede", "Hz", False),
-        ([field for field in ("heatsink_temp_c", "internal_temp_c") if field in data], "Temperaturas", "graus C", False),
+        ([field for field in data if field.endswith("_temp_c")], "Temperaturas", "graus C", False),
         (["insulation_kohm"], "Resistência de isolamento", "kOhm", False),
         (["leakage_ma"], "Corrente de fuga", "mA", True),
         (["power_factor"], "Fator de potência", "f.p.", False),
+        (["bus_voltage_v"], "Tensão do barramento", "V", False),
+        (["signal_dbm"], "Sinal de comunicação", "dBm", False),
     ]
     auxiliary = [(fields, title, unit, zero) for fields, title, unit, zero in auxiliary if any(field in data and data[field].notna().any() for field in fields)]
     if auxiliary:

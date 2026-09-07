@@ -117,10 +117,73 @@ class InverterCurveTests(unittest.TestCase):
             reader = PdfReader(BytesIO(pdf))
             text = "\n".join(page.extract_text() or "" for page in reader.pages)
             self.assertGreaterEqual(len(reader.pages), 3)
-            self.assertIn("Relatório técnico de curva do inversor", text)
-            self.assertIn("Comportamento dos MPPTs", text)
+            self.assertIn("Relatório técnico de análise diária", text)
+            self.assertIn("Comportamento dos MPPTs / entradas CC", text)
             self.assertIn("Diagnóstico e recomendações", text)
             self.assertIn("Carlos Jessé Soares", text)
+        finally:
+            if previous_db is None:
+                os.environ.pop("SOLAR_CRM_DB", None)
+            else:
+                os.environ["SOLAR_CRM_DB"] = previous_db
+            db_path.unlink(missing_ok=True)
+
+    def test_monthly_english_export_sums_days_and_reports_empty_string_channels(self):
+        from solar_crm.inverter_curve import analyze_inverter_curve
+
+        frame = pd.DataFrame({
+            "serial number": ["INV-01"] * 6,
+            "time": [
+                "2026-08-10 08:00:00", "2026-08-10 12:00:00", "2026-08-10 17:00:00",
+                "2026-08-11 08:00:00", "2026-08-11 12:00:00", "2026-08-11 17:00:00",
+            ],
+            "E-today(kWh)": [1, 10, 20, 2, 12, 25],
+            "E-total(MWh)": [32.50, 32.51, 32.52, 32.52, 32.53, 32.55],
+            "Active power(kW)": [1, 6, 0, 1, 7, 0],
+            "DC current1(A)": [2, 9, 0, 2, 10, 0],
+            "DC voltage1(V)": [300, 330, 290, 301, 331, 291],
+            "String current1(A)": [None] * 6,
+            "R-phase voltage(V)": [220, 225, 221, 219, 226, 220],
+            "S-phase voltage(V)": [221, 224, 220, 220, 225, 221],
+            "T-phase voltage(V)": [219, 223, 222, 221, 224, 222],
+        })
+        result = analyze_inverter_curve(workbook_bytes(frame), "INV_11_08_2026.xlsx")
+        self.assertEqual(result["mapping"]["active_power_kw"], "Active power(kW)")
+        self.assertEqual(result["summary"]["analysis_type"], "Período")
+        self.assertEqual(result["summary"]["date_start"], "2026-08-10")
+        self.assertEqual(result["summary"]["date_end"], "2026-08-11")
+        self.assertEqual(result["summary"]["period_energy_kwh"], 45)
+        self.assertEqual(result["coverage"]["recognized_string_channels"], 1)
+        self.assertEqual(result["coverage"]["string_channels_with_values"], 0)
+        self.assertTrue(any("string" in issue.parameter.lower() for issue in result["issues"]))
+
+    def test_pdf_can_be_created_without_registered_client_or_plant(self):
+        temp_root = Path(__file__).resolve().parents[1] / "tmp" / "tests"
+        temp_root.mkdir(parents=True, exist_ok=True)
+        db_path = temp_root / f"standalone-pdf-{uuid.uuid4().hex}.db"
+        previous_db = os.environ.get("SOLAR_CRM_DB")
+        os.environ["SOLAR_CRM_DB"] = str(db_path)
+        try:
+            from pypdf import PdfReader
+
+            from solar_crm.curve_documents import generate_inverter_curve_pdf
+            from solar_crm.db import init_db
+            from solar_crm.inverter_curve import analyze_inverter_curve
+
+            init_db(seed=False)
+            frame = pd.DataFrame({"time": ["2026-09-07 08:00", "2026-09-07 09:00", "2026-09-07 10:00"], "Active power(kW)": [1, 3, 2]})
+            result = analyze_inverter_curve(workbook_bytes(frame), "curva.xlsx")
+            pdf = generate_inverter_curve_pdf(
+                None,
+                "INV-15K",
+                "curva.xlsx",
+                result,
+                report_context={"client_name": "Cliente avulso", "plant_name": "Usina avulsa", "address": "Patos - PB"},
+            )
+            text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(pdf)).pages)
+            self.assertIn("Cliente avulso", text)
+            self.assertIn("Usina avulsa", text)
+            self.assertIn("Patos - PB", text)
         finally:
             if previous_db is None:
                 os.environ.pop("SOLAR_CRM_DB", None)
