@@ -14,11 +14,12 @@ import requests
 from PIL import Image, ImageOps
 from pypdf import PdfReader
 
-from solar_crm.config import openai_api_key, openai_model
+from solar_crm.config import ai_provider, gemini_api_key, gemini_model, openai_api_key, openai_model
 from solar_crm.inverter_curve import CurveAnalysisError, analyze_inverter_curve
 
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+GEMINI_GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 SUPPORTED_EXTENSIONS = {".xlsx", ".csv", ".pdf", ".docx", ".txt", ".md", ".jpg", ".jpeg", ".png", ".webp"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024
@@ -29,12 +30,17 @@ class AssistantError(ValueError):
     """A safe, user-facing assistant error."""
 
 
-def assistant_api_key() -> str:
-    return openai_api_key()
+def assistant_provider() -> str:
+    # Never fall back silently from the configured free provider to a paid one.
+    return ai_provider()
 
 
-def assistant_model() -> str:
-    return openai_model()
+def assistant_api_key(provider: str | None = None) -> str:
+    return gemini_api_key() if (provider or assistant_provider()) == "gemini" else openai_api_key()
+
+
+def assistant_model(provider: str | None = None) -> str:
+    return gemini_model() if (provider or assistant_provider()) == "gemini" else openai_model()
 
 
 def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
@@ -209,10 +215,11 @@ def ask_assistant(
     history: list[dict[str, Any]],
     attachments: list[dict[str, Any]],
     *,
+    provider: str = "openai",
     session: requests.Session | None = None,
 ) -> tuple[str, dict[str, int]]:
     if not api_key.strip():
-        raise AssistantError("A chave da API da OpenAI ainda não foi configurada.")
+        raise AssistantError(f"A chave da API do {('Gemini' if provider == 'gemini' else 'OpenAI')} ainda não foi configurada.")
     transcript = "\n".join(
         f"{('USUÁRIO' if message.get('role') == 'user' else 'ASSISTENTE')}: {message.get('content', '')}"
         for message in history[-8:]
@@ -227,48 +234,88 @@ def ask_assistant(
         f"PERGUNTA ATUAL:\n{question}",
         MAX_CONTEXT_CHARS + 8_000,
     )
-    content: list[dict[str, Any]] = [{"type": "input_text", "text": input_text}]
-    content.extend({"type": "input_image", "image_url": item["data_url"], "detail": "high"} for item in images)
-    payload = {
-        "model": model,
-        "instructions": _assistant_instructions(),
-        "input": [{"role": "user", "content": content}],
-        "max_output_tokens": 1400,
-        "store": False,
-        "text": {"verbosity": "medium"},
-    }
     client = session or requests.Session()
+    if provider == "gemini":
+        parts: list[dict[str, Any]] = [{"text": input_text}]
+        for item in images:
+            encoded = item["data_url"].split(",", 1)[-1]
+            parts.append({"inlineData": {"mimeType": item["mime_type"], "data": encoded}})
+        payload = {
+            "systemInstruction": {"parts": [{"text": _assistant_instructions()}]},
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {
+                "maxOutputTokens": 2000,
+                "thinkingConfig": {"thinkingLevel": "low"},
+            },
+            "store": False,
+        }
+        url = GEMINI_GENERATE_URL.format(model=model)
+        headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
+    else:
+        content: list[dict[str, Any]] = [{"type": "input_text", "text": input_text}]
+        content.extend({"type": "input_image", "image_url": item["data_url"], "detail": "high"} for item in images)
+        payload = {
+            "model": model,
+            "instructions": _assistant_instructions(),
+            "input": [{"role": "user", "content": content}],
+            "max_output_tokens": 1400,
+            "store": False,
+            "text": {"verbosity": "medium"},
+        }
+        url = OPENAI_RESPONSES_URL
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     try:
         response = client.post(
-            OPENAI_RESPONSES_URL,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            url,
+            headers=headers,
             json=payload,
             timeout=120,
         )
     except requests.RequestException as exc:
         raise AssistantError("Não foi possível conectar à IA agora. Verifique a internet e tente novamente.") from exc
-    if response.status_code == 401:
-        raise AssistantError("A chave da API foi recusada. Confira o segredo OPENAI_API_KEY no Streamlit.")
+    provider_label = "Gemini" if provider == "gemini" else "OpenAI"
+    if response.status_code in {401, 403}:
+        secret_name = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
+        raise AssistantError(f"A chave da API foi recusada. Confira o segredo {secret_name} no Streamlit.")
     if response.status_code == 429:
+        if provider == "gemini":
+            raise AssistantError("O limite gratuito do Gemini foi atingido. Aguarde a renovação da cota e tente novamente.")
         raise AssistantError("O limite ou o saldo da API foi atingido. Confira o faturamento e o limite mensal da OpenAI.")
+    if response.status_code == 404 and provider == "gemini":
+        raise AssistantError("O modelo do Gemini configurado não está disponível. Confira GEMINI_MODEL nos Secrets.")
     if response.status_code >= 400:
-        raise AssistantError(f"A IA recusou a solicitação (HTTP {response.status_code}). Tente reduzir os anexos ou aguarde alguns minutos.")
+        raise AssistantError(f"O {provider_label} recusou a solicitação (HTTP {response.status_code}). Tente reduzir os anexos ou aguarde alguns minutos.")
     try:
         body = response.json()
-        answer = "\n".join(
-            block.get("text", "")
-            for item in body.get("output", [])
-            if item.get("type") == "message"
-            for block in item.get("content", [])
-            if block.get("type") == "output_text"
-        ).strip()
+        if provider == "gemini":
+            answer = "\n".join(
+                part.get("text", "")
+                for candidate in body.get("candidates", [])
+                for part in candidate.get("content", {}).get("parts", [])
+                if part.get("text")
+            ).strip()
+            raw_usage = body.get("usageMetadata") or {}
+            usage = {
+                "input_tokens": int(raw_usage.get("promptTokenCount") or 0),
+                "output_tokens": int(raw_usage.get("candidatesTokenCount") or 0),
+                "total_tokens": int(raw_usage.get("totalTokenCount") or 0),
+            }
+        else:
+            answer = "\n".join(
+                block.get("text", "")
+                for item in body.get("output", [])
+                if item.get("type") == "message"
+                for block in item.get("content", [])
+                if block.get("type") == "output_text"
+            ).strip()
+            raw_usage = body.get("usage") or {}
+            usage = {
+                "input_tokens": int(raw_usage.get("input_tokens") or 0),
+                "output_tokens": int(raw_usage.get("output_tokens") or 0),
+                "total_tokens": int(raw_usage.get("total_tokens") or 0),
+            }
         if not answer:
             raise KeyError("output_text")
-        usage = body.get("usage") or {}
-        return answer, {
-            "input_tokens": int(usage.get("input_tokens") or 0),
-            "output_tokens": int(usage.get("output_tokens") or 0),
-            "total_tokens": int(usage.get("total_tokens") or 0),
-        }
+        return answer, usage
     except (TypeError, ValueError, KeyError) as exc:
         raise AssistantError("A IA respondeu em um formato inesperado. Tente novamente.") from exc

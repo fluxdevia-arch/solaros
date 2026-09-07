@@ -66,6 +66,26 @@ def openai_model() -> str:
     return str(_streamlit_secret("openai", "model") or "gpt-5-mini").strip()
 
 
+def gemini_api_key() -> str:
+    environment_value = os.getenv("GEMINI_API_KEY", "").strip()
+    if environment_value:
+        return environment_value
+    return str(_streamlit_secret("gemini", "api_key") or "").strip()
+
+
+def gemini_model() -> str:
+    environment_value = os.getenv("GEMINI_MODEL", "").strip()
+    if environment_value:
+        return environment_value
+    return str(_streamlit_secret("gemini", "model") or "gemini-3.7-flash").strip()
+
+
+def ai_provider() -> str:
+    """Return the preferred assistant provider, defaulting to Gemini's free tier."""
+    configured = str(setting("SOLAROS_AI_PROVIDER", default="gemini") or "gemini").strip().lower()
+    return configured if configured in {"gemini", "openai"} else "gemini"
+
+
 def allowed_emails() -> set[str]:
     configured = setting("SOLAROS_ALLOWED_EMAILS", default=[])
     if isinstance(configured, str):

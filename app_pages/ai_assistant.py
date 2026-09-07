@@ -7,6 +7,7 @@ from solar_crm.ai_assistant import (
     ask_assistant,
     assistant_api_key,
     assistant_model,
+    assistant_provider,
     prepare_attachment,
 )
 from solar_crm.ui import page_intro
@@ -16,15 +17,17 @@ page_intro(
     "Converse sobre usinas, planilhas, relatórios, datasheets e fotos de campo com apoio de inteligência artificial."
 )
 
-api_key = assistant_api_key()
-model = assistant_model()
+provider = assistant_provider()
+api_key = assistant_api_key(provider)
+model = assistant_model(provider)
+provider_label = "Gemini" if provider == "gemini" else "OpenAI"
 st.session_state.setdefault("ai_messages", [])
 st.session_state.setdefault("ai_attachments", [])
 st.session_state.setdefault("ai_usage", {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
 
 with st.container(horizontal=True, vertical_alignment="center"):
     if api_key:
-        st.success(f"Assistente conectado · modelo {model}", icon=":material/cloud_done:")
+        st.success(f"Assistente conectado ao {provider_label} · modelo {model}", icon=":material/cloud_done:")
     else:
         st.warning("Assistente preparado, aguardando a chave da API.", icon=":material/key:")
     if st.button("Nova conversa", icon=":material/refresh:", key="ai_new_conversation"):
@@ -36,16 +39,26 @@ with st.container(horizontal=True, vertical_alignment="center"):
 if not api_key:
     with st.container(border=True):
         st.subheader("Ativação necessária", icon=":material/settings:")
-        st.write(
-            "Para ativar o chat, crie uma chave de API com faturamento separado do ChatGPT Plus e adicione "
-            "o segredo abaixo nas configurações do aplicativo no Streamlit Cloud."
-        )
-        st.code('[openai]\napi_key = "sua-chave-aqui"\nmodel = "gpt-5-mini"', language="toml")
-        st.link_button(
-            "Criar chave na OpenAI",
-            "https://platform.openai.com/api-keys",
-            icon=":material/open_in_new:",
-        )
+        if provider == "gemini":
+            st.write(
+                "Crie gratuitamente uma chave no Google AI Studio e adicione o segredo abaixo nas "
+                "configurações do aplicativo no Streamlit Cloud. Não é necessário cadastrar cartão para começar."
+            )
+            st.code('[gemini]\napi_key = "sua-chave-aqui"\nmodel = "gemini-3.7-flash"', language="toml")
+            st.link_button(
+                "Criar chave gratuita no Google AI Studio",
+                "https://aistudio.google.com/app/apikey",
+                icon=":material/open_in_new:",
+            )
+            st.caption("A camada gratuita possui limites de uso. Ao atingir a cota, o SolarOS aguardará a renovação sem cobrar automaticamente.")
+            st.warning(
+                "Na camada gratuita, remova CPF, documentos pessoais, senhas e outros dados sensíveis antes de enviar arquivos.",
+                icon=":material/privacy_tip:",
+            )
+        else:
+            st.write("Adicione a chave da OpenAI nas configurações do aplicativo no Streamlit Cloud.")
+            st.code('[openai]\napi_key = "sua-chave-aqui"\nmodel = "gpt-5-mini"', language="toml")
+            st.link_button("Criar chave na OpenAI", "https://platform.openai.com/api-keys", icon=":material/open_in_new:")
         st.caption("A chave fica no servidor e não é exibida no navegador nem salva no banco de clientes.")
 
 if not st.session_state.ai_messages:
@@ -124,6 +137,7 @@ if submission:
                         user_message["content"],
                         st.session_state.ai_messages[:-1],
                         st.session_state.ai_attachments,
+                        provider=provider,
                     )
                     st.markdown(answer)
                     st.session_state.ai_messages.append({"role": "assistant", "content": answer})

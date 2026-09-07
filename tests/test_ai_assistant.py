@@ -24,13 +24,30 @@ class _Response:
         }
 
 
+class _GeminiResponse:
+    status_code = 200
+
+    def json(self):
+        return {
+            "candidates": [
+                {"content": {"parts": [{"text": "Possível aquecimento; confirme por termografia."}]}}
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 90,
+                "candidatesTokenCount": 20,
+                "totalTokenCount": 110,
+            },
+        }
+
+
 class _Session:
-    def __init__(self):
+    def __init__(self, response=None):
         self.request = None
+        self.response = response or _Response()
 
     def post(self, url, **kwargs):
         self.request = {"url": url, **kwargs}
-        return _Response()
+        return self.response
 
 
 class AiAssistantTests(unittest.TestCase):
@@ -77,6 +94,31 @@ class AiAssistantTests(unittest.TestCase):
     def test_missing_api_key_is_rejected_before_network_call(self):
         with self.assertRaisesRegex(AssistantError, "chave da API"):
             ask_assistant("", "gpt-5-mini", "Teste", [], [])
+
+    def test_gemini_photo_request_uses_free_tier_connector(self):
+        source = BytesIO()
+        Image.new("RGB", (800, 600), "blue").save(source, format="JPEG")
+        attachment = prepare_attachment("inversor.jpg", "image/jpeg", source.getvalue())
+        session = _Session(_GeminiResponse())
+
+        answer, usage = ask_assistant(
+            "gemini-test-key",
+            "gemini-3.7-flash",
+            "Avalie o inversor",
+            [],
+            [attachment],
+            provider="gemini",
+            session=session,
+        )
+
+        self.assertIn("termografia", answer)
+        self.assertEqual(usage["total_tokens"], 110)
+        self.assertIn("generativelanguage.googleapis.com", session.request["url"])
+        self.assertEqual(session.request["headers"]["x-goog-api-key"], "gemini-test-key")
+        payload = session.request["json"]
+        self.assertIn("systemInstruction", payload)
+        self.assertTrue(any("inlineData" in part for part in payload["contents"][0]["parts"]))
+        self.assertNotIn("gemini-test-key", str(payload))
 
 
 if __name__ == "__main__":
