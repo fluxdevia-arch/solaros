@@ -274,9 +274,16 @@ def ask_assistant(
     except requests.RequestException as exc:
         raise AssistantError("Não foi possível conectar à IA agora. Verifique a internet e tente novamente.") from exc
     provider_label = "Gemini" if provider == "gemini" else "OpenAI"
-    if response.status_code in {401, 403}:
+    if response.status_code == 401:
         secret_name = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
-        raise AssistantError(f"A chave da API foi recusada. Confira o segredo {secret_name} no Streamlit.")
+        raise AssistantError(f"A chave da API é inválida. Confira o segredo {secret_name} no Streamlit.")
+    if response.status_code == 403 and provider == "gemini":
+        raise AssistantError(
+            "O Google reconheceu a chave, mas negou a permissão. No Google AI Studio, crie uma nova chave "
+            "do tipo Auth, restrita à Gemini API, aceite os termos e substitua GEMINI_API_KEY no Streamlit."
+        )
+    if response.status_code == 403:
+        raise AssistantError("A OpenAI reconheceu a chave, mas ela não tem permissão para usar esse recurso.")
     if response.status_code == 429:
         if provider == "gemini":
             raise AssistantError("O limite gratuito do Gemini foi atingido. Aguarde a renovação da cota e tente novamente.")

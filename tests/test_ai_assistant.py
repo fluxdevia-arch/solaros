@@ -40,6 +40,13 @@ class _GeminiResponse:
         }
 
 
+class _ForbiddenResponse:
+    status_code = 403
+
+    def json(self):
+        return {"error": {"status": "PERMISSION_DENIED"}}
+
+
 class _Session:
     def __init__(self, response=None):
         self.request = None
@@ -119,6 +126,18 @@ class AiAssistantTests(unittest.TestCase):
         self.assertIn("systemInstruction", payload)
         self.assertTrue(any("inlineData" in part for part in payload["contents"][0]["parts"]))
         self.assertNotIn("gemini-test-key", str(payload))
+
+    def test_gemini_permission_error_explains_auth_key_requirement(self):
+        with self.assertRaisesRegex(AssistantError, "nova chave.*tipo Auth"):
+            ask_assistant(
+                "standard-key",
+                "gemini-3.7-flash",
+                "Teste",
+                [],
+                [],
+                provider="gemini",
+                session=_Session(_ForbiddenResponse()),
+            )
 
 
 if __name__ == "__main__":
