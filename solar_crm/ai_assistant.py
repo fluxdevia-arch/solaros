@@ -30,6 +30,44 @@ class AssistantError(ValueError):
     """A safe, user-facing assistant error."""
 
 
+def _safe_google_error_detail(response: requests.Response) -> str:
+    """Return useful Google error context without exposing credentials or account data."""
+    try:
+        body = response.json()
+    except (TypeError, ValueError):
+        return ""
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return ""
+
+    status = str(error.get("status") or "").strip()
+    message = str(error.get("message") or "").strip()
+    reasons: list[str] = []
+    for detail in error.get("details") or []:
+        if not isinstance(detail, dict):
+            continue
+        reason = str(detail.get("reason") or "").strip()
+        if reason and reason not in reasons:
+            reasons.append(reason)
+
+    # Google messages can contain a project identifier, URL, email or even echo a bad key.
+    message = re.sub(r"AIza[\w-]+", "[chave protegida]", message)
+    message = re.sub(r"https?://\S+", "[link do Google]", message)
+    message = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[conta protegida]", message)
+    message = re.sub(r"\b(?:projects?/)?\d{6,}\b", "[projeto protegido]", message)
+    message = re.sub(r"\bgen-lang-client-\d+\b", "[projeto protegido]", message)
+    message = message[:320].rstrip(" ,.;")
+
+    codes = " / ".join(part for part in [status, *reasons] if part)
+    if codes and message:
+        return f" Código do Google: {codes}. Detalhe: {message}."
+    if codes:
+        return f" Código do Google: {codes}."
+    if message:
+        return f" Detalhe do Google: {message}."
+    return ""
+
+
 def assistant_provider() -> str:
     # Never fall back silently from the configured free provider to a paid one.
     return ai_provider()
@@ -285,9 +323,10 @@ def ask_assistant(
         secret_name = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
         raise AssistantError(f"A chave da API é inválida. Confira o segredo {secret_name} no Streamlit.")
     if response.status_code == 403 and provider == "gemini":
+        detail = _safe_google_error_detail(response)
         raise AssistantError(
-            "O projeto do Google negou acesso à Gemini API. Confirme no Google AI Studio se a chave é do tipo "
-            "Auth, se os termos foram aceitos e se a Gemini API está permitida nas restrições dessa chave."
+            "O Google negou a autorização desta chamada ao Gemini."
+            f"{detail} A chave permanece protegida; use o código acima para corrigir a configuração exata."
         )
     if response.status_code == 403:
         raise AssistantError("A OpenAI reconheceu a chave, mas ela não tem permissão para usar esse recurso.")

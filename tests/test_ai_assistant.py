@@ -48,7 +48,17 @@ class _ForbiddenResponse:
     status_code = 403
 
     def json(self):
-        return {"error": {"status": "PERMISSION_DENIED"}}
+        return {
+            "error": {
+                "status": "PERMISSION_DENIED",
+                "message": (
+                    "Generative Language API has not been used in project 123456789012. "
+                    "Enable it at https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com. "
+                    "Contact admin@example.com and do not expose AIzaExampleSecretValue."
+                ),
+                "details": [{"reason": "SERVICE_DISABLED"}],
+            }
+        }
 
 
 class _Session:
@@ -133,8 +143,8 @@ class AiAssistantTests(unittest.TestCase):
         self.assertTrue(any(part.get("type") == "image" for part in payload["input"]))
         self.assertNotIn("gemini-test-key", str(payload))
 
-    def test_gemini_permission_error_explains_project_access(self):
-        with self.assertRaisesRegex(AssistantError, "projeto do Google.*tipo Auth"):
+    def test_gemini_permission_error_includes_safe_google_reason(self):
+        with self.assertRaisesRegex(AssistantError, "PERMISSION_DENIED / SERVICE_DISABLED") as captured:
             ask_assistant(
                 "standard-key",
                 "gemini-3.7-flash",
@@ -144,6 +154,11 @@ class AiAssistantTests(unittest.TestCase):
                 provider="gemini",
                 session=_Session(_ForbiddenResponse()),
             )
+        message = str(captured.exception)
+        self.assertNotIn("123456789012", message)
+        self.assertNotIn("admin@example.com", message)
+        self.assertNotIn("AIzaExampleSecretValue", message)
+        self.assertNotIn("https://", message)
 
 
 if __name__ == "__main__":
