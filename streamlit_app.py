@@ -62,7 +62,6 @@ pages = {
         st.Page("app_pages/plants.py", title="Usinas", icon=":material/solar_power:"),
     ],
     "Pós-venda": [
-        st.Page("app_pages/ai_assistant.py", title="Assistente SolarOS", icon=":material/smart_toy:"),
         st.Page("app_pages/readings.py", title="Leituras e faturas", icon=":material/bolt:"),
         st.Page("app_pages/integrations.py", title="Integrações", icon=":material/api:"),
         st.Page("app_pages/inverter_diagnostics.py", title="Diagnóstico por Excel", icon=":material/analytics:"),
