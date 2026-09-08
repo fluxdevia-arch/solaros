@@ -828,7 +828,12 @@ def init_db(seed: bool = True) -> None:
                    brand_logo=NULL,
                    brand_logo_mime=NULL,
                    share_base_url=CASE
-                       WHEN share_base_url LIKE 'https://solaros.streamlit.app%'
+                       WHEN share_base_url IN (
+                           'https://solaros.streamlit.app',
+                           'https://solaros.streamlit.app/',
+                           'https://solaros.streamlit.app/settings',
+                           'https://solaros.streamlit.app/settings/'
+                       )
                        THEN 'https://gridengenharia.streamlit.app'
                        ELSE share_base_url
                    END
