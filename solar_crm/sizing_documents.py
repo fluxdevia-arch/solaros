@@ -195,7 +195,7 @@ def generate_general_sizing_pdf(memorial: str, save_path: str | Path | None = No
     story = _header(company, "Memorial de pré-dimensionamento", f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles)
     for raw_line in memorial.splitlines():
         line = raw_line.strip()
-        if not line or line.startswith("# SolarOS") or line.startswith("Gerado em "):
+        if not line or line.startswith("# ") or line.startswith("Gerado em "):
             continue
         if line.startswith("> "):
             story += [_notice(line[2:], styles), Spacer(1, 0.18 * cm)]

@@ -146,7 +146,7 @@ def connect() -> sqlite3.Connection | PostgresConnection:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    app_name TEXT NOT NULL DEFAULT 'SolarOS By OnGrid',
+    app_name TEXT NOT NULL DEFAULT 'GRID Engenharia',
     brand_logo BLOB,
     brand_logo_mime TEXT,
     company_name TEXT NOT NULL,
@@ -807,7 +807,7 @@ def init_db(seed: bool = True) -> None:
                     signature_image, signature_image_mime)
                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    "SolarOS By OnGrid",
+                    "GRID Engenharia",
                     "SolarOS Energia Solar",
                     "SolarOS Energia Solar Ltda.",
                     "00.000.000/0001-00",
@@ -822,6 +822,18 @@ def init_db(seed: bool = True) -> None:
                     None,
                 ),
             )
+        conn.execute(
+            """UPDATE settings
+               SET app_name='GRID Engenharia',
+                   brand_logo=NULL,
+                   brand_logo_mime=NULL,
+                   share_base_url=CASE
+                       WHEN share_base_url LIKE 'https://solaros.streamlit.app%'
+                       THEN 'https://gridengenharia.streamlit.app'
+                       ELSE share_base_url
+                   END
+               WHERE app_name IN ('SolarOS By OnGrid', 'Solaros By OnGrid')"""
+        )
         conn.execute(
             """UPDATE settings
                SET company_name='SolarOS Energia Solar',
@@ -852,7 +864,7 @@ def init_db(seed: bool = True) -> None:
 def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> None:
     if getattr(conn, "is_postgres", False):
         additions = {
-            "app_name": "TEXT NOT NULL DEFAULT 'SolarOS By OnGrid'",
+            "app_name": "TEXT NOT NULL DEFAULT 'GRID Engenharia'",
             "brand_logo": "BYTEA",
             "brand_logo_mime": "TEXT",
             "technical_name": "TEXT",
@@ -878,7 +890,7 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
         return
     columns = {row[1] for row in conn.execute("PRAGMA table_info(settings)").fetchall()}
     additions = {
-        "app_name": "TEXT NOT NULL DEFAULT 'SolarOS By OnGrid'",
+        "app_name": "TEXT NOT NULL DEFAULT 'GRID Engenharia'",
         "brand_logo": "BLOB",
         "brand_logo_mime": "TEXT",
         "technical_name": "TEXT",

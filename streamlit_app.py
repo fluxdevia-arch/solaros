@@ -6,7 +6,7 @@ from solar_crm.config import seed_demo_data
 from solar_crm.db import SCHEMA_VERSION, database_cache_key, init_db, query_one, using_postgres
 
 st.set_page_config(
-    page_title="Gestão solar",
+    page_title="GRID Engenharia",
     page_icon=":material/solar_power:",
     layout="wide",
     initial_sidebar_state="auto",

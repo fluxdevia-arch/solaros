@@ -147,8 +147,22 @@ class DatabaseAndPdfTests(unittest.TestCase):
 
         init_db(seed=False)
         settings = query_one("SELECT * FROM settings WHERE id=1")
-        self.assertEqual(settings["app_name"], "SolarOS By OnGrid")
+        self.assertEqual(settings["app_name"], "GRID Engenharia")
         self.assertIn("brand_logo", settings)
+        logo_path = configured_logo(settings)
+        with Image.open(logo_path) as default_logo:
+            self.assertEqual(default_logo.mode, "RGBA")
+            self.assertEqual(default_logo.getchannel("A").getextrema(), (0, 255))
+
+        execute(
+            "UPDATE settings SET app_name=?, brand_logo=?, brand_logo_mime='image/png', share_base_url=? WHERE id=1",
+            ("SolarOS By OnGrid", b"old-logo", "https://solaros.streamlit.app/settings"),
+        )
+        init_db(seed=False)
+        migrated = query_one("SELECT * FROM settings WHERE id=1")
+        self.assertEqual(migrated["app_name"], "GRID Engenharia")
+        self.assertIsNone(migrated["brand_logo"])
+        self.assertEqual(migrated["share_base_url"], "https://gridengenharia.streamlit.app")
 
         source = Image.new("RGBA", (2400, 900), (15, 90, 170, 128))
         raw = BytesIO()

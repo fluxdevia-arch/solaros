@@ -30,7 +30,7 @@ with left:
                 help="Prefira PNG com fundo transparente. O arquivo será otimizado para uso no aplicativo e nos PDFs.",
             )
             remove_brand_logo = st.checkbox(
-                "Voltar ao logotipo padrão do SolarOS",
+                "Voltar ao logotipo padrão do sistema",
                 disabled=not bool(settings.get("brand_logo")),
             )
             st.divider()
@@ -48,13 +48,13 @@ with left:
                 "Assinatura manuscrita",
                 type=["png", "jpg", "jpeg"],
                 max_upload_size=5,
-                help="Prefira uma foto nítida, com assinatura escura sobre papel branco. O SolarOS remove o fundo e recorta as margens.",
+                help="Prefira uma foto nítida, com assinatura escura sobre papel branco. O sistema remove o fundo e recorta as margens.",
             )
             remove_signature = st.checkbox("Remover a assinatura manuscrita atual", disabled=not bool(settings["signature_image"]))
             share_base_url = st.text_input(
                 "URL para compartilhar ordens de serviço e vistorias",
                 value=resolve_share_base_url(settings.get("share_base_url"), str(st.context.url)),
-                help="Na hospedagem, o SolarOS detecta automaticamente o endereço público. Em rede local, você pode informar o IP do computador.",
+                help="Na hospedagem, o sistema detecta automaticamente o endereço público. Em rede local, você pode informar o IP do computador.",
             )
             footer = st.text_area("Rodapé e observação legal dos relatórios", value=settings["report_footer"] or "")
             if st.form_submit_button("Salvar configurações", type="primary", icon=":material/save:"):
@@ -130,7 +130,7 @@ with right:
     with st.container(border=True):
         st.subheader("Sobre esta versão", icon=":material/info:")
         st.markdown("""
-        **SolarOS v2.1**
+        **GRID Engenharia v2.1**
 
         - CRM de clientes e usinas
         - Contratos e receita recorrente

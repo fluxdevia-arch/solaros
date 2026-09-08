@@ -175,7 +175,7 @@ def _render_photo_capture(inspection_id: int) -> None:
             except (ValueError, OSError) as exc:
                 st.error(str(exc), icon=":material/error:")
 
-        st.caption("O SolarOS reduz as imagens antes de armazenar. Limite de 20 fotos por vistoria.")
+        st.caption("O sistema reduz as imagens antes de armazenar. Limite de 20 fotos por vistoria.")
 
 
 def _render_field_form(inspection: dict) -> None:

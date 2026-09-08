@@ -237,7 +237,7 @@ def generate_roof_croqui(
     small_font = _font(15)
 
     draw.rounded_rectangle((24, 22, 1576, 92), radius=18, fill=(255, 255, 255, 238), outline="#0B6E4F", width=3)
-    draw.text((50, 38), f"SolarOS | Croqui fotovoltaico - {project.get('name', 'Projeto')}", font=title_font, fill="#17352B")
+    draw.text((50, 38), f"GRID Engenharia | Croqui fotovoltaico - {project.get('name', 'Projeto')}", font=title_font, fill="#17352B")
 
     roof_box = (45, 125, 1125, 800)
     draw.rounded_rectangle(roof_box, radius=24, fill=(236, 241, 237, 120), outline="#455A50", width=4)

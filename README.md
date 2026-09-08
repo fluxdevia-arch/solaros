@@ -1,4 +1,4 @@
-# SolarOS
+# GRID Engenharia
 
 Sistema profissional para estruturar o pós-venda e o pré-dimensionamento de projetos de energia solar. O SolarOS reúne clientes, usinas, contratos recorrentes, leituras mensais, faturas, economia, atividades, manutenções, chamados e relatórios em PDF.
 

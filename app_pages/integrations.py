@@ -20,7 +20,7 @@ from solar_crm.monitoring import (
 )
 from solar_crm.ui import date_br, flash, month_label, page_intro, plant_options, render_delete_control, show_flash
 
-page_intro("Use o SolarZ como central principal para importar usinas, geração diária e desempenho mensal diretamente para o SolarOS.")
+page_intro("Use o SolarZ como central principal para importar usinas, geração diária e desempenho mensal diretamente para o sistema.")
 show_flash()
 
 connections = query(
@@ -64,10 +64,10 @@ with accounts_tab:
     with st.container(border=True):
         st.subheader("SolarZ Monitoramento · integração principal", icon=":material/verified:")
         st.write(
-            "Centralize usinas de diferentes fabricantes em uma única conta e envie ao SolarOS "
+            "Centralize usinas de diferentes fabricantes em uma única conta e envie ao sistema "
             "a geração diária e a meta de geração usada no desempenho mensal."
         )
-        st.success("Conector oficial ativo no SolarOS.", icon=":material/check_circle:")
+        st.success("Conector oficial ativo no sistema.", icon=":material/check_circle:")
         st.markdown(
             "Para conectar, gere as credenciais em **SolarZ > Configurações > Usuário de API > Gerar Usuário de API**. "
             "A senha aparece uma única vez. [Abrir orientação oficial da SolarZ](https://monitoramento.ajuda.solarz.com.br/monitoramento/api-solarz)"
@@ -89,7 +89,7 @@ with accounts_tab:
         with st.form(f"new_integration_{provider}"):
             connection_name = st.text_input(
                 "Nome da conexão",
-                placeholder="Ex.: SolarZ principal" if provider == SOLARZ else "Ex.: Conta instalador SolarOS",
+                placeholder="Ex.: SolarZ principal" if provider == SOLARZ else "Ex.: Conta do instalador",
             )
             base_url = st.text_input("Endereço da API", value=DEFAULT_URLS[provider])
             key_label = "Usuário de API" if provider == SOLARZ else "API ID"
@@ -212,17 +212,17 @@ with mapping_tab:
     if not remote_plants:
         st.info("Na aba Contas de API, teste a conexão para buscar as usinas do fabricante.", icon=":material/info:")
     elif not local_plants:
-        st.warning("Cadastre uma usina no SolarOS antes de criar o vínculo.", icon=":material/warning:")
+        st.warning("Cadastre uma usina no sistema antes de criar o vínculo.", icon=":material/warning:")
     else:
         st.subheader("Correspondência entre as usinas", icon=":material/link:")
-        st.caption("Cada usina do SolarOS pode apontar para uma usina remota. Isso impede duplicidade de geração.")
+        st.caption("Cada usina do sistema pode apontar para uma usina remota. Isso impede duplicidade de geração.")
         local_map = plant_options(local_plants)
         remote_map = {
             f"{row['integration_name']} · {row['name']} · ID {row['remote_plant_id']}": row
             for row in remote_plants
         }
         with st.form("link_monitoring_plant"):
-            local_label = st.selectbox("Usina no SolarOS", list(local_map))
+            local_label = st.selectbox("Usina no sistema", list(local_map))
             remote_label = st.selectbox("Usina encontrada no portal", list(remote_map))
             device_sn = st.text_input("Número de série do inversor/datalogger", help="Opcional nesta etapa; útil para alarmes por equipamento.")
             if st.form_submit_button("Vincular usinas", type="primary", icon=":material/link:"):
@@ -237,14 +237,14 @@ with mapping_tab:
     if mappings:
         linked_df = pd.DataFrame(mappings).rename(columns={
             "client_name": "Cliente",
-            "plant_name": "Usina SolarOS",
+            "plant_name": "Usina local",
             "provider": "Portal",
             "remote_name": "Usina remota",
             "remote_plant_id": "ID remoto",
             "last_sync_at": "Última sincronização",
             "last_sync_status": "Resultado",
             "last_error": "Erro",
-        })[["Cliente", "Usina SolarOS", "Portal", "Usina remota", "ID remoto", "Última sincronização", "Resultado", "Erro"]]
+        })[["Cliente", "Usina local", "Portal", "Usina remota", "ID remoto", "Última sincronização", "Resultado", "Erro"]]
         st.dataframe(linked_df, hide_index=True)
         mapping_delete_map = {
             f"{row['client_name']} · {row['plant_name']} · {row['provider']}": row

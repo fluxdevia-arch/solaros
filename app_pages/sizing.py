@@ -45,7 +45,7 @@ def decimal(value: float, digits: int = 2) -> str:
 
 def build_memorial() -> str:
     lines = [
-        "# SolarOS — memorial de pré-dimensionamento",
+        "# GRID Engenharia — memorial de pré-dimensionamento",
         "",
         f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}.",
         "",
@@ -394,7 +394,7 @@ with project_tab:
 
 with special_tab:
     st.subheader("Sistemas com armazenamento, limitação de exportação e bombeamento", icon=":material/battery_charging_full:")
-    st.caption("Cadastre as cargas e as condições do local. O SolarOS entrega o pré-dimensionamento energético, elétrico, hidráulico e a lista técnica preliminar.")
+    st.caption("Cadastre as cargas e as condições do local. O sistema entrega o pré-dimensionamento energético, elétrico, hidráulico e a lista técnica preliminar.")
     special_mode = st.selectbox(
         "Modalidade do sistema",
         SYSTEM_TYPES,
@@ -689,7 +689,7 @@ with special_tab:
             st.download_button(
                 "Baixar memorial técnico em PDF",
                 pdf,
-                file_name=f"solaros-{special_mode.lower().replace(' ', '-')}.pdf",
+                file_name=f"grid-engenharia-{special_mode.lower().replace(' ', '-')}.pdf",
                 mime="application/pdf",
                 icon=":material/download:",
             )
@@ -915,7 +915,7 @@ with memorial_tab:
         st.download_button(
             "Baixar memorial em PDF",
             pdf,
-            file_name="solaros_memorial_dimensionamento.pdf",
+            file_name="grid_engenharia_memorial_dimensionamento.pdf",
             mime="application/pdf",
             type="primary",
             icon=":material/download:",

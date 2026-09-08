@@ -9,8 +9,8 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-APP_NAME = "SolarOS By OnGrid"
-APP_LOGO = PROJECT_ROOT / "assets" / "ongrid_logo_transparent.png"
+APP_NAME = "GRID Engenharia"
+APP_LOGO = PROJECT_ROOT / "assets" / "grid_engenharia_logo.png"
 
 MAX_BRAND_LOGO_BYTES = 5 * 1024 * 1024
 MAX_BRAND_LOGO_PIXELS = 16_000_000

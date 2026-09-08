@@ -84,7 +84,7 @@ uploaded = st.file_uploader(
 )
 
 if uploaded is None:
-    st.info("Preencha a identificação, envie o Excel e o SolarOS montará a análise automaticamente.", icon=":material/upload_file:")
+    st.info("Preencha a identificação, envie o Excel e o sistema montará a análise automaticamente.", icon=":material/upload_file:")
     st.stop()
 
 content = uploaded.getvalue()
@@ -257,7 +257,7 @@ with st.container(border=True):
     if coverage["recognized_string_channels"] and not coverage["string_channels_with_values"]:
         st.warning(
             f"Existem {coverage['recognized_string_channels']} colunas de strings no Excel, mas todas estão vazias. "
-            "O SolarOS não inventa valores: analisa os canais CC/MPPT preenchidos e registra essa limitação no PDF."
+            "O sistema não inventa valores: analisa os canais CC/MPPT preenchidos e registra essa limitação no PDF."
         )
     elif result["string_summary"]:
         st.dataframe(pd.DataFrame(result["string_summary"]), hide_index=True)
