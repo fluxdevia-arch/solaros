@@ -308,6 +308,74 @@ class StreamlitSmokeTest(unittest.TestCase):
         self.assertEqual(float(cash_entry["amount"]), 500.0)
         self.assertEqual(cash_entry["category"], "Mensalidade pós-venda")
 
+    def test_contract_and_payment_can_be_edited_and_synced_to_cash(self):
+        from solar_crm.db import query_one
+
+        app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        app = AppTest.from_file(app_path, default_timeout=20).run()
+        app.switch_page("app_pages/clients.py").run()
+        self.assertFalse(app.exception)
+
+        client_id = app.session_state["selected_client_id"]
+        contract = query_one(
+            """SELECT * FROM contracts
+               WHERE client_id=? AND billing_cycle='Mensal' AND status='Ativo'
+               ORDER BY id DESC LIMIT 1""",
+            (client_id,),
+        )
+        contract_label = next(
+            option for option in app.selectbox(key="client_contract_delete_selector").options
+            if option.startswith(f"#{contract['id']} ·")
+        )
+        app.selectbox(key="client_contract_delete_selector").set_value(contract_label).run()
+        app.number_input(key=f"contract_edit_base_{contract['id']}").set_value(600.0)
+        app.number_input(key=f"contract_edit_per_plant_{contract['id']}").set_value(0.0)
+        app.number_input(key=f"contract_edit_per_kwp_{contract['id']}").set_value(0.0)
+        app.number_input(key=f"contract_edit_extras_{contract['id']}").set_value(0.0)
+        app.number_input(key=f"contract_edit_discount_{contract['id']}").set_value(0.0)
+        app.button(key=f"contract_edit_submit_{contract['id']}").click().run()
+
+        self.assertFalse(app.exception)
+        updated_contract = query_one("SELECT * FROM contracts WHERE id=?", (contract["id"],))
+        self.assertEqual(float(updated_contract["base_fee"]), 600.0)
+        self.assertEqual(float(updated_contract["per_plant_fee"]), 0.0)
+        self.assertEqual(float(updated_contract["per_kwp_fee"]), 0.0)
+        invoice = query_one(
+            """SELECT * FROM invoices
+               WHERE contract_id=? AND deleted_at IS NULL AND status IN ('Pendente', 'Atrasado')
+               ORDER BY id DESC LIMIT 1""",
+            (contract["id"],),
+        )
+        self.assertEqual(float(invoice["amount"]), 600.0)
+        cash_entry = query_one(
+            "SELECT * FROM cash_transactions WHERE source_type='invoice' AND source_id=?",
+            (invoice["id"],),
+        )
+        self.assertEqual(float(cash_entry["amount"]), 600.0)
+
+        invoice_label = next(
+            option for option in app.selectbox(key="client_invoice_delete_selector").options
+            if option.startswith(f"FAT-{invoice['id']} ·")
+        )
+        app.selectbox(key="client_invoice_delete_selector").set_value(invoice_label).run()
+        app.number_input(key=f"invoice_edit_amount_{invoice['id']}").set_value(650.0)
+        app.selectbox(key=f"invoice_edit_status_{invoice['id']}").set_value("Pago")
+        app.selectbox(key=f"invoice_edit_payment_method_{invoice['id']}").set_value("Pix")
+        app.button(key=f"invoice_edit_submit_{invoice['id']}").click().run()
+
+        self.assertFalse(app.exception)
+        edited_invoice = query_one("SELECT * FROM invoices WHERE id=?", (invoice["id"],))
+        self.assertEqual(float(edited_invoice["amount"]), 650.0)
+        self.assertEqual(edited_invoice["status"], "Pago")
+        self.assertIsNotNone(edited_invoice["paid_at"])
+        edited_cash = query_one(
+            "SELECT * FROM cash_transactions WHERE source_type='invoice' AND source_id=?",
+            (invoice["id"],),
+        )
+        self.assertEqual(float(edited_cash["amount"]), 650.0)
+        self.assertEqual(edited_cash["status"], "Recebido")
+        self.assertEqual(edited_cash["payment_method"], "Pix")
+
     def test_public_service_order_route_renders_without_login(self):
         from solar_crm.db import init_db, query_one
         from solar_crm.workflow import create_service_order

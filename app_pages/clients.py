@@ -117,6 +117,7 @@ plants = query(
     "SELECT * FROM plants WHERE client_id=? ORDER BY name",
     (client_id,),
 )
+billable_plants = [plant for plant in plants if plant["status"] != "Desativada"]
 contracts = query("SELECT * FROM contracts WHERE client_id=? ORDER BY id DESC", (client_id,))
 recurring_contract = next(
     (
@@ -126,11 +127,11 @@ recurring_contract = next(
     None,
 )
 one_time_contracts = [row for row in contracts if row["billing_cycle"] == "Parcela única"]
-capacity = sum(float(plant["installed_kwp"] or 0) for plant in plants)
+capacity = sum(float(plant["installed_kwp"] or 0) for plant in billable_plants)
 equipment_summary = equipment_summary_for_client(client_id)
 total_inverters = sum(types.get("Inversor", 0) for types in equipment_summary.values())
 total_panels = sum(types.get("Painel solar", 0) for types in equipment_summary.values())
-monthly = contract_monthly_value(recurring_contract, len(plants), capacity) if recurring_contract else 0
+monthly = contract_monthly_value(recurring_contract, len(billable_plants), capacity) if recurring_contract else 0
 total_savings = query_one(
     """SELECT COALESCE(SUM(r.reference_amount-r.billed_amount),0) AS value
        FROM readings r JOIN plants p ON p.id=r.plant_id WHERE p.client_id=?""",
@@ -208,6 +209,10 @@ with contract_tab:
             "Desconto": f"{recurring_contract['discount_pct']:.1f}%",
             "Índice de reajuste": recurring_contract["reajust_index"],
         }, border="horizontal", width="content")
+        st.caption(
+            "A mensalidade é calculada somando base mensal, valor por usina ativa, valor por kWp "
+            "e adicionais, com o desconto aplicado ao final. Zere os componentes que não fazem parte do contrato."
+        )
         st.subheader("Escopo contratado", icon=":material/checklist:")
         st.write(recurring_contract["scope"] or "Escopo não informado.")
     else:
@@ -390,16 +395,179 @@ with contract_tab:
                     st.rerun()
 
     if contracts:
-        contract_delete_map = {
+        contract_admin_map = {
             f"#{row['id']} · {row['plan']} · {row['billing_cycle']} · {row['status']}": row
             for row in contracts
         }
-        contract_delete_label = st.selectbox(
+        contract_admin_label = st.selectbox(
             "Contrato para administrar",
-            list(contract_delete_map),
+            list(contract_admin_map),
             key="client_contract_delete_selector",
         )
-        contract_to_delete = contract_delete_map[contract_delete_label]
+        contract_to_edit = contract_admin_map[contract_admin_label]
+
+        with st.expander("Editar contrato selecionado", icon=":material/edit_note:"):
+            is_one_time = contract_to_edit["billing_cycle"] == "Parcela única"
+            with st.form(f"edit_contract_{contract_to_edit['id']}"):
+                edit_plan = st.text_input(
+                    "Plano, consultoria ou serviço",
+                    value=contract_to_edit["plan"] or "",
+                    key=f"contract_edit_plan_{contract_to_edit['id']}",
+                )
+                c1, c2 = st.columns(2)
+                edit_start = c1.date_input(
+                    "Início",
+                    value=date.fromisoformat(str(contract_to_edit["start_date"])[:10]),
+                    key=f"contract_edit_start_{contract_to_edit['id']}",
+                )
+                status_options = ["Ativo", "Encerrado", "Cancelado"]
+                current_contract_status = contract_to_edit["status"]
+                if current_contract_status not in status_options:
+                    status_options.append(current_contract_status)
+                edit_contract_status = c2.selectbox(
+                    "Status",
+                    status_options,
+                    index=status_options.index(current_contract_status),
+                    key=f"contract_edit_status_{contract_to_edit['id']}",
+                )
+                edit_billing_day = st.number_input(
+                    "Dia de cobrança",
+                    min_value=1,
+                    max_value=28,
+                    value=min(max(int(contract_to_edit["billing_day"] or 10), 1), 28),
+                    key=f"contract_edit_billing_day_{contract_to_edit['id']}",
+                )
+                if is_one_time:
+                    edit_base_fee = st.number_input(
+                        "Valor único (R$)",
+                        min_value=0.0,
+                        value=float(contract_to_edit["base_fee"] or 0),
+                        step=100.0,
+                        key=f"contract_edit_base_{contract_to_edit['id']}",
+                    )
+                    edit_per_plant = 0.0
+                    edit_per_kwp = 0.0
+                    edit_extras = 0.0
+                    edit_discount = 0.0
+                    edit_reajust_index = "Não aplicável"
+                    edit_next_reajust = None
+                else:
+                    p1, p2 = st.columns(2)
+                    edit_base_fee = p1.number_input(
+                        "Base mensal (R$)", min_value=0.0,
+                        value=float(contract_to_edit["base_fee"] or 0), step=10.0,
+                        key=f"contract_edit_base_{contract_to_edit['id']}",
+                    )
+                    edit_per_plant = p2.number_input(
+                        "Por usina ativa (R$)", min_value=0.0,
+                        value=float(contract_to_edit["per_plant_fee"] or 0), step=10.0,
+                        key=f"contract_edit_per_plant_{contract_to_edit['id']}",
+                    )
+                    edit_per_kwp = p1.number_input(
+                        "Por kWp ativo (R$)", min_value=0.0,
+                        value=float(contract_to_edit["per_kwp_fee"] or 0), step=0.1,
+                        key=f"contract_edit_per_kwp_{contract_to_edit['id']}",
+                    )
+                    edit_extras = p2.number_input(
+                        "Serviços adicionais (R$)", min_value=0.0,
+                        value=float(contract_to_edit["extras_fee"] or 0), step=10.0,
+                        key=f"contract_edit_extras_{contract_to_edit['id']}",
+                    )
+                    edit_discount = st.number_input(
+                        "Desconto (%)", min_value=0.0, max_value=100.0,
+                        value=float(contract_to_edit["discount_pct"] or 0), step=0.5,
+                        key=f"contract_edit_discount_{contract_to_edit['id']}",
+                    )
+                    edit_reajust_index = st.text_input(
+                        "Índice de reajuste",
+                        value=contract_to_edit["reajust_index"] or "IPCA",
+                        key=f"contract_edit_reajust_{contract_to_edit['id']}",
+                    )
+                    current_next_reajust = (
+                        date.fromisoformat(str(contract_to_edit["next_reajust_date"])[:10])
+                        if contract_to_edit["next_reajust_date"] else edit_start.replace(year=edit_start.year + 1)
+                    )
+                    edit_next_reajust = st.date_input(
+                        "Próximo reajuste",
+                        value=current_next_reajust,
+                        key=f"contract_edit_next_reajust_{contract_to_edit['id']}",
+                    )
+                    preview_amount = contract_monthly_value(
+                        {
+                            "base_fee": edit_base_fee,
+                            "per_plant_fee": edit_per_plant,
+                            "per_kwp_fee": edit_per_kwp,
+                            "extras_fee": edit_extras,
+                            "discount_pct": edit_discount,
+                        },
+                        len(billable_plants),
+                        capacity,
+                    )
+                    st.info(f"Mensalidade recalculada: {money(preview_amount)}")
+                edit_scope = st.text_area(
+                    "Escopo e observações",
+                    value=contract_to_edit["scope"] or "",
+                    key=f"contract_edit_scope_{contract_to_edit['id']}",
+                )
+                update_open_charges = st.checkbox(
+                    "Atualizar também cobranças pendentes e atrasadas deste contrato",
+                    value=True,
+                    key=f"contract_edit_charges_{contract_to_edit['id']}",
+                )
+                if st.form_submit_button(
+                    "Salvar alterações do contrato",
+                    type="primary",
+                    icon=":material/save:",
+                    key=f"contract_edit_submit_{contract_to_edit['id']}",
+                ):
+                    if not edit_plan.strip():
+                        st.error("Informe o nome do plano, consultoria ou serviço.")
+                    else:
+                        execute(
+                            """UPDATE contracts
+                               SET plan=?, start_date=?, billing_day=?, base_fee=?, per_plant_fee=?,
+                                   per_kwp_fee=?, extras_fee=?, discount_pct=?, status=?, scope=?,
+                                   reajust_index=?, next_reajust_date=?
+                               WHERE id=?""",
+                            (
+                                edit_plan.strip(), edit_start.isoformat(), int(edit_billing_day),
+                                edit_base_fee, edit_per_plant, edit_per_kwp, edit_extras,
+                                edit_discount, edit_contract_status, edit_scope.strip(),
+                                edit_reajust_index.strip() or "IPCA",
+                                edit_next_reajust.isoformat() if edit_next_reajust else None,
+                                contract_to_edit["id"],
+                            ),
+                        )
+                        if update_open_charges:
+                            revised_amount = (
+                                edit_base_fee if is_one_time else contract_monthly_value(
+                                    {
+                                        "base_fee": edit_base_fee,
+                                        "per_plant_fee": edit_per_plant,
+                                        "per_kwp_fee": edit_per_kwp,
+                                        "extras_fee": edit_extras,
+                                        "discount_pct": edit_discount,
+                                    },
+                                    len(billable_plants),
+                                    capacity,
+                                )
+                            )
+                            open_invoices = query(
+                                """SELECT id FROM invoices
+                                   WHERE contract_id=? AND deleted_at IS NULL
+                                     AND status IN ('Pendente', 'Atrasado')""",
+                                (contract_to_edit["id"],),
+                            )
+                            for open_invoice in open_invoices:
+                                execute(
+                                    "UPDATE invoices SET amount=?, notes=? WHERE id=?",
+                                    (revised_amount, edit_scope.strip(), open_invoice["id"]),
+                                )
+                                sync_invoice_to_cash(open_invoice["id"])
+                        flash("Contrato atualizado e cobranças em aberto sincronizadas.")
+                        st.rerun()
+
+        contract_to_delete = contract_to_edit
         render_delete_control(
             "contract",
             contract_to_delete["id"],
@@ -505,7 +673,11 @@ with billing_tab:
                         st.rerun()
 
     invoice_rows = query(
-        """SELECT i.id, i.reference_month, i.amount, i.status, c.plan
+        """SELECT i.id, i.reference_month, i.due_date, i.amount, i.status, i.paid_at,
+                  i.notes, c.plan,
+                  (SELECT payment_method FROM cash_transactions ct
+                   WHERE ct.source_type='invoice' AND ct.source_id=i.id
+                   ORDER BY ct.id DESC LIMIT 1) AS payment_method
            FROM invoices i JOIN contracts c ON c.id=i.contract_id
            WHERE c.client_id=? AND i.deleted_at IS NULL
            ORDER BY i.reference_month DESC, i.id DESC""",
@@ -522,6 +694,98 @@ with billing_tab:
             key="client_invoice_delete_selector",
         )
         invoice_to_delete = invoice_delete_map[invoice_delete_label]
+
+        with st.expander("Editar cobrança ou pagamento", icon=":material/edit_square:"):
+            invoice_status_options = ["Pendente", "Pago", "Atrasado", "Cancelado"]
+            payment_options = ["Não informado", "Pix", "Boleto", "Transferência", "Cartão", "Dinheiro", "Outro"]
+            current_payment_method = invoice_to_delete["payment_method"] or "Não informado"
+            if current_payment_method not in payment_options:
+                payment_options.append(current_payment_method)
+            with st.form(f"edit_invoice_{invoice_to_delete['id']}"):
+                i1, i2 = st.columns(2)
+                edit_invoice_reference = i1.date_input(
+                    "Mês de referência",
+                    value=date.fromisoformat(str(invoice_to_delete["reference_month"])[:10]),
+                    key=f"invoice_edit_reference_{invoice_to_delete['id']}",
+                )
+                edit_invoice_due = i2.date_input(
+                    "Vencimento",
+                    value=date.fromisoformat(str(invoice_to_delete["due_date"])[:10]),
+                    key=f"invoice_edit_due_{invoice_to_delete['id']}",
+                )
+                edit_invoice_amount = i1.number_input(
+                    "Valor da cobrança (R$)",
+                    min_value=0.0,
+                    value=float(invoice_to_delete["amount"] or 0),
+                    step=10.0,
+                    key=f"invoice_edit_amount_{invoice_to_delete['id']}",
+                )
+                edit_invoice_status = i2.selectbox(
+                    "Status",
+                    invoice_status_options,
+                    index=invoice_status_options.index(invoice_to_delete["status"]),
+                    key=f"invoice_edit_status_{invoice_to_delete['id']}",
+                )
+                current_paid_at = (
+                    date.fromisoformat(str(invoice_to_delete["paid_at"])[:10])
+                    if invoice_to_delete["paid_at"] else date.today()
+                )
+                edit_paid_at = i1.date_input(
+                    "Data do pagamento",
+                    value=current_paid_at,
+                    help="A data será usada somente quando o status for Pago.",
+                    key=f"invoice_edit_paid_at_{invoice_to_delete['id']}",
+                )
+                edit_payment_method = i2.selectbox(
+                    "Forma de pagamento",
+                    payment_options,
+                    index=payment_options.index(current_payment_method),
+                    key=f"invoice_edit_payment_method_{invoice_to_delete['id']}",
+                )
+                edit_invoice_notes = st.text_area(
+                    "Descrição ou observações",
+                    value=invoice_to_delete["notes"] or "",
+                    key=f"invoice_edit_notes_{invoice_to_delete['id']}",
+                )
+                if st.form_submit_button(
+                    "Salvar cobrança e pagamento",
+                    type="primary",
+                    icon=":material/save:",
+                    key=f"invoice_edit_submit_{invoice_to_delete['id']}",
+                ):
+                    reference_month = edit_invoice_reference.replace(day=1).isoformat()
+                    duplicate_invoice = query_one(
+                        """SELECT id FROM invoices
+                           WHERE contract_id=(SELECT contract_id FROM invoices WHERE id=?)
+                             AND reference_month=? AND id!=? AND deleted_at IS NULL""",
+                        (invoice_to_delete["id"], reference_month, invoice_to_delete["id"]),
+                    )
+                    if duplicate_invoice:
+                        st.error("Já existe outra cobrança deste contrato para o mês informado.")
+                    else:
+                        paid_at = edit_paid_at.isoformat() if edit_invoice_status == "Pago" else None
+                        execute(
+                            """UPDATE invoices
+                               SET reference_month=?, due_date=?, amount=?, status=?, paid_at=?, notes=?
+                               WHERE id=?""",
+                            (
+                                reference_month, edit_invoice_due.isoformat(), edit_invoice_amount,
+                                edit_invoice_status, paid_at, edit_invoice_notes.strip(),
+                                invoice_to_delete["id"],
+                            ),
+                        )
+                        sync_invoice_to_cash(invoice_to_delete["id"])
+                        execute(
+                            """UPDATE cash_transactions SET payment_method=?
+                               WHERE source_type='invoice' AND source_id=?""",
+                            (
+                                None if edit_payment_method == "Não informado" else edit_payment_method,
+                                invoice_to_delete["id"],
+                            ),
+                        )
+                        flash("Cobrança e pagamento atualizados no caixa.")
+                        st.rerun()
+
         render_delete_control(
             "invoice",
             invoice_to_delete["id"],
