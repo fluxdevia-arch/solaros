@@ -4,6 +4,28 @@ from urllib.parse import urlsplit, urlunsplit
 
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+APP_PAGE_ROUTES = {
+    "ai_assistant",
+    "cash",
+    "clients",
+    "dashboard",
+    "equipment_analysis",
+    "inspections",
+    "integrations",
+    "inverter_diagnostics",
+    "operations",
+    "pipeline",
+    "plants",
+    "pricing",
+    "proposals",
+    "readings",
+    "reports",
+    "service-orders",
+    "service_contracts",
+    "service_orders",
+    "settings",
+    "sizing",
+}
 
 
 def _normalized_url(value: str | None) -> str:
@@ -24,22 +46,21 @@ def _is_public(value: str) -> bool:
 
 
 def _browser_app_base(current_url: str) -> str:
-    """Derive the app base, removing the two public field-page routes."""
+    """Derive the app base, removing any SolarOS page route from the URL."""
     normalized = _normalized_url(current_url)
     if not normalized:
         return ""
     parts = urlsplit(normalized)
     path = parts.path.rstrip("/")
-    for route in ("/inspections", "/service-orders"):
-        if path.endswith(route):
-            path = path[: -len(route)]
-            break
+    segments = path.split("/")
+    if segments and segments[-1] in APP_PAGE_ROUTES:
+        path = "/".join(segments[:-1]).rstrip("/")
     return urlunsplit((parts.scheme, parts.netloc, path, "", "")).rstrip("/")
 
 
 def resolve_share_base_url(configured_url: str | None, current_url: str | None) -> str:
     """Prefer the real public browser host over a stale localhost setting."""
-    configured = _normalized_url(configured_url)
+    configured = _browser_app_base(str(configured_url or ""))
     browser_base = _browser_app_base(str(current_url or ""))
 
     if _is_public(browser_base):

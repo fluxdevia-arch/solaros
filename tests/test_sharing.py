@@ -28,6 +28,24 @@ class ShareUrlTests(unittest.TestCase):
             "https://solaros.streamlit.app",
         )
 
+    def test_stale_admin_page_is_removed_from_configured_and_browser_urls(self):
+        self.assertEqual(
+            resolve_share_base_url(
+                "https://solaros.streamlit.app/settings/",
+                "https://solaros.streamlit.app/inspections",
+            ),
+            "https://solaros.streamlit.app",
+        )
+
+    def test_custom_subpath_is_preserved_while_page_route_is_removed(self):
+        self.assertEqual(
+            resolve_share_base_url(
+                "https://portal.ongrid.com.br/solaros/settings",
+                "https://portal.ongrid.com.br/solaros/inspections",
+            ),
+            "https://portal.ongrid.com.br/solaros",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
