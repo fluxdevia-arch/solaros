@@ -63,6 +63,7 @@ pages = {
     ],
     "Pós-venda": [
         st.Page("app_pages/readings.py", title="Leituras e faturas", icon=":material/bolt:"),
+        st.Page("app_pages/bill_audits.py", title="Auditoria de faturas", icon=":material/receipt_long:"),
         st.Page("app_pages/integrations.py", title="Integrações", icon=":material/api:"),
         st.Page("app_pages/inverter_diagnostics.py", title="Diagnóstico por Excel", icon=":material/analytics:"),
         st.Page("app_pages/equipment_analysis.py", title="Análise de equipamentos", icon=":material/vital_signs:"),
