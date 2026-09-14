@@ -61,6 +61,8 @@ class BillAudit:
     injected_measured_kwh: float | None = None
     compensated_kwh: float = 0.0
     credit_balance_kwh: float = 0.0
+    credit_balance_peak_kwh: float = 0.0
+    credit_balance_off_peak_kwh: float = 0.0
     gross_consumption_cost: float = 0.0
     solar_credit_value: float = 0.0
     fio_b_value: float = 0.0
@@ -75,6 +77,9 @@ class BillAudit:
     estimated_savings_5_years: float = 0.0
     historical_average_kwh: float = 0.0
     historical_consumption_kwh: list[tuple[str, float]] = field(default_factory=list)
+    previous_month_label: str = ""
+    previous_month_consumption_kwh: float = 0.0
+    consumption_variation_pct: float | None = None
     items: list[BillItem] = field(default_factory=list)
     findings: list[dict[str, str]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -404,18 +409,22 @@ def analyze_energisa_bill(pdf_data: bytes, filename: str = "fatura.pdf") -> Bill
     audit.consumption_kwh = round(measured_consumption or sum(item.quantity or 0 for item in consumption_items), 3)
     audit.injected_measured_kwh = round(measured_injection, 3) if measured_injection is not None else None
 
-    balance = re.search(r"Saldo Acumulado:\s*([\d.,]+)", remaining_ascii, re.IGNORECASE)
-    if balance:
-        raw_balance = balance.group(1)
-        audit.credit_balance_kwh = _number(raw_balance.replace(".", "") if "," not in raw_balance else raw_balance)
+    balances = re.search(r"Saldo Ac:\s*([\d.,]+)\(P\)\s*([\d.,]+)\(FP\)", remaining_ascii, re.IGNORECASE)
+    if balances:
+        audit.credit_balance_peak_kwh = _number(balances.group(1))
+        audit.credit_balance_off_peak_kwh = _number(balances.group(2))
+        audit.credit_balance_kwh = audit.credit_balance_peak_kwh + audit.credit_balance_off_peak_kwh
     else:
-        balances = re.search(r"Saldo Ac:\s*([\d.,]+)\(P\)\s*([\d.,]+)\(FP\)", remaining_ascii, re.IGNORECASE)
-        if balances:
-            audit.credit_balance_kwh = _number(balances.group(1)) + _number(balances.group(2))
+        balance = re.search(r"Saldo Acumulado:\s*([\d.,]+)", remaining_ascii, re.IGNORECASE)
+        if balance:
+            raw_balance = balance.group(1)
+            audit.credit_balance_kwh = _number(raw_balance.replace(".", "") if "," not in raw_balance else raw_balance)
 
     audit.historical_consumption_kwh = _history(remaining_pages, group_a)
     historical_values = [value for _, value in audit.historical_consumption_kwh]
     audit.historical_average_kwh = round(sum(historical_values) / len(historical_values), 2) if historical_values else 0.0
+    if len(audit.historical_consumption_kwh) >= 2:
+        audit.previous_month_label, audit.previous_month_consumption_kwh = audit.historical_consumption_kwh[1]
 
     audit.estimated_savings_month = round(max(audit.solar_credit_value - audit.fio_b_value, 0.0), 2)
     audit.estimated_without_solar = round(audit.invoice_amount + audit.estimated_savings_month, 2)
@@ -426,8 +435,7 @@ def analyze_energisa_bill(pdf_data: bytes, filename: str = "fatura.pdf") -> Bill
     if audit.unit_profile.startswith("Geradora"):
         audit.warnings.append("A fatura não mede a energia autoconsumida instantaneamente. A economia estimada considera apenas créditos e cobranças visíveis no documento.")
     audit.warnings.append("Projeções anuais e de cinco anos repetem o resultado deste ciclo, sem inflação, reajuste tarifário, degradação ou sazonalidade.")
-    audit.findings = _findings(audit)
-    return audit
+    return recalculate_audit(audit)
 
 
 def recalculate_audit(audit: BillAudit) -> BillAudit:
@@ -436,6 +444,15 @@ def recalculate_audit(audit: BillAudit) -> BillAudit:
     audit.estimated_without_solar = round(audit.invoice_amount + audit.estimated_savings_month, 2)
     audit.estimated_savings_year = round(audit.estimated_savings_month * 12, 2)
     audit.estimated_savings_5_years = round(audit.estimated_savings_month * 60, 2)
+    if audit.previous_month_consumption_kwh > 0:
+        audit.consumption_variation_pct = round(
+            (audit.consumption_kwh / audit.previous_month_consumption_kwh - 1) * 100,
+            2,
+        )
+    else:
+        audit.consumption_variation_pct = None
+    if audit.credit_balance_peak_kwh or audit.credit_balance_off_peak_kwh:
+        audit.credit_balance_kwh = round(audit.credit_balance_peak_kwh + audit.credit_balance_off_peak_kwh, 3)
     audit.findings = _findings(audit)
     return audit
 

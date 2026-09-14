@@ -87,6 +87,29 @@ class EnergisaBillAuditTests(unittest.TestCase):
         self.assertAlmostEqual(audit.estimated_savings_month, 8089.83)
         self.assertAlmostEqual(audit.estimated_without_solar, 9621.81)
         self.assertAlmostEqual(audit.icms_value, 1174.59)
+        self.assertEqual(audit.previous_month_label, "JUL/26")
+        self.assertAlmostEqual(audit.previous_month_consumption_kwh, 8919.0)
+        self.assertAlmostEqual(audit.consumption_variation_pct, 14.0)
+
+    def test_separates_peak_and_off_peak_credit_balances_for_group_a(self):
+        first_page = FIRST_PAGE.replace(
+            "MTC-CONVENCIONAL BAIXA TENSÃO / B3",
+            "MTV-MOD.TARIFÁRIA VERDE / A4",
+        )
+        second_page = SECOND_PAGE.replace(
+            "UC de compensação de energia classificada como GD_I",
+            "UC com Microgeração classificada como GD_I",
+        ).replace(
+            "Saldo Acumulado: 4.462 A expirar no próximo ciclo: 0",
+            "Saldo Ac: 6(P) 17(FP) A expirar em 09/2026: 0(P) 0(FP)",
+        )
+        with patch("solar_crm.bill_audit._extract_layout", return_value=(first_page, second_page)):
+            audit = analyze_energisa_bill(b"synthetic", "grupo-a.pdf")
+
+        self.assertEqual(audit.unit_profile, "Geradora - Grupo A")
+        self.assertAlmostEqual(audit.credit_balance_peak_kwh, 6.0)
+        self.assertAlmostEqual(audit.credit_balance_off_peak_kwh, 17.0)
+        self.assertAlmostEqual(audit.credit_balance_kwh, 23.0)
 
     def test_generates_signed_audit_pdf_with_financial_and_energy_sections(self):
         with patch("solar_crm.bill_audit._extract_layout", return_value=(FIRST_PAGE, SECOND_PAGE)):
@@ -98,6 +121,8 @@ class EnergisaBillAuditTests(unittest.TestCase):
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertIn("AUDITORIA DE FATURA DE ENERGIA", text)
         self.assertIn("Balanço de energia e créditos", text)
+        self.assertIn("Comparação mensal", text)
+        self.assertIn("Aumento de 14,0%", text)
         self.assertIn("Fio B / ajuste GD II", text)
         self.assertIn("Achados da auditoria", text)
         self.assertIn("Carlos Jessé Soares", text)

@@ -79,6 +79,19 @@ with st.expander("Conferir e corrigir dados extraídos", icon=":material/edit:")
     with right:
         audit.invoice_amount = st.number_input("Valor faturado (R$)", min_value=0.0, value=float(audit.invoice_amount), step=1.0, key="bill_amount")
         audit.consumption_kwh = st.number_input("Energia medida consumida (kWh)", min_value=0.0, value=float(audit.consumption_kwh), step=1.0, key="bill_consumed")
+        audit.previous_month_label = st.text_input(
+            "Referência do mês anterior",
+            value=audit.previous_month_label,
+            placeholder="Ex.: JUL/26",
+            key="bill_previous_label",
+        )
+        audit.previous_month_consumption_kwh = st.number_input(
+            "Consumo do mês anterior (kWh)",
+            min_value=0.0,
+            value=float(audit.previous_month_consumption_kwh),
+            step=1.0,
+            key="bill_previous_consumption",
+        )
         has_measured_injection = st.checkbox(
             "A fatura informa energia injetada medida",
             value=audit.injected_measured_kwh is not None,
@@ -95,7 +108,30 @@ with st.expander("Conferir e corrigir dados extraídos", icon=":material/edit:")
         )
         audit.injected_measured_kwh = float(measured_injection) if has_measured_injection else None
         audit.compensated_kwh = st.number_input("Energia compensada (kWh)", min_value=0.0, value=float(audit.compensated_kwh), step=1.0, key="bill_compensated")
-        audit.credit_balance_kwh = st.number_input("Saldo de créditos (kWh)", min_value=0.0, value=float(audit.credit_balance_kwh), step=1.0, key="bill_credit_balance")
+        if "Grupo A" in audit.unit_profile:
+            balance_left, balance_right = st.columns(2)
+            audit.credit_balance_peak_kwh = balance_left.number_input(
+                "Saldo - ponta (kWh)",
+                min_value=0.0,
+                value=float(audit.credit_balance_peak_kwh),
+                step=1.0,
+                key="bill_credit_balance_peak",
+            )
+            audit.credit_balance_off_peak_kwh = balance_right.number_input(
+                "Saldo - fora de ponta (kWh)",
+                min_value=0.0,
+                value=float(audit.credit_balance_off_peak_kwh),
+                step=1.0,
+                key="bill_credit_balance_off_peak",
+            )
+        else:
+            audit.credit_balance_kwh = st.number_input(
+                "Saldo de créditos (kWh)",
+                min_value=0.0,
+                value=float(audit.credit_balance_kwh),
+                step=1.0,
+                key="bill_credit_balance",
+            )
 
     st.markdown("##### Valores financeiros conferidos")
     c1, c2, c3, c4 = st.columns(4)
@@ -119,15 +155,43 @@ with st.container(horizontal=True):
     st.metric("Projeção em 5 anos", money(audit.estimated_savings_5_years), border=True)
 
 st.subheader("Balanço da unidade", icon=":material/energy_savings_leaf:")
+comparison_delta = None
+comparison_sentence = "O consumo do mês anterior não foi identificado na fatura."
+if audit.consumption_variation_pct is not None:
+    variation = audit.consumption_variation_pct
+    comparison_delta = f"{'+' if variation >= 0 else '-'}{number_br(abs(variation), 1)}% vs {audit.previous_month_label or 'mês anterior'}"
+    if variation > 0:
+        comparison_sentence = (
+            f"Aumento de {number_br(abs(variation), 1)}% comparado a {audit.previous_month_label or 'mês anterior'} "
+            f"({number_br(audit.previous_month_consumption_kwh, 2)} kWh)."
+        )
+    elif variation < 0:
+        comparison_sentence = (
+            f"Redução de {number_br(abs(variation), 1)}% comparada a {audit.previous_month_label or 'mês anterior'} "
+            f"({number_br(audit.previous_month_consumption_kwh, 2)} kWh)."
+        )
+    else:
+        comparison_sentence = f"Consumo estável em relação a {audit.previous_month_label or 'mês anterior'}."
 with st.container(horizontal=True):
-    st.metric("Consumida", f"{number_br(audit.consumption_kwh, 2)} kWh", border=True)
+    st.metric(
+        "Consumida",
+        f"{number_br(audit.consumption_kwh, 2)} kWh",
+        delta=comparison_delta,
+        delta_color="inverse",
+        border=True,
+    )
     st.metric(
         "Injetada medida",
         "Não informada" if audit.injected_measured_kwh is None else f"{number_br(audit.injected_measured_kwh, 2)} kWh",
         border=True,
     )
     st.metric("Compensada", f"{number_br(audit.compensated_kwh, 2)} kWh", border=True)
-    st.metric("Saldo de créditos", f"{number_br(audit.credit_balance_kwh, 2)} kWh", border=True)
+    if "Grupo A" in audit.unit_profile:
+        st.metric("Saldo - ponta", f"{number_br(audit.credit_balance_peak_kwh, 2)} kWh", border=True)
+        st.metric("Saldo - fora de ponta", f"{number_br(audit.credit_balance_off_peak_kwh, 2)} kWh", border=True)
+    else:
+        st.metric("Saldo de créditos", f"{number_br(audit.credit_balance_kwh, 2)} kWh", border=True)
+st.info(comparison_sentence, icon=":material/compare_arrows:")
 
 if audit.historical_consumption_kwh:
     st.subheader("Histórico de consumo", icon=":material/bar_chart:")

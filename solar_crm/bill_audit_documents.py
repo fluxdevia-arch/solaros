@@ -144,7 +144,10 @@ def generate_bill_audit_pdf(audit: BillAudit, save_path: str | Path | None = Non
         fontName="Helvetica-Bold", fontSize=12.5, leading=14, textColor=NAVY,
     ))
     styles.add(ParagraphStyle(
-        name="AuditFinding", parent=styles["DocSmall"], fontSize=7.4, leading=9.4,
+        name="AuditFinding", parent=styles["DocSmall"], fontSize=7.1, leading=8.6,
+    ))
+    styles.add(ParagraphStyle(
+        name="AuditNote", parent=styles["DocSmall"], fontSize=7.1, leading=8.6,
     ))
 
     buffer = BytesIO()
@@ -193,15 +196,38 @@ def generate_bill_audit_pdf(audit: BillAudit, save_path: str | Path | None = Non
     ))
 
     injected = "Não disponível no quadro de medição" if audit.injected_measured_kwh is None else f"{number_br(audit.injected_measured_kwh, 2)} kWh"
+    if audit.consumption_variation_pct is None:
+        comparison = "Não disponível"
+    elif audit.consumption_variation_pct > 0:
+        comparison = f"Aumento de {number_br(audit.consumption_variation_pct, 1)}%"
+    elif audit.consumption_variation_pct < 0:
+        comparison = f"Redução de {number_br(abs(audit.consumption_variation_pct), 1)}%"
+    else:
+        comparison = "Sem variação"
     story += [Spacer(1, 0.3 * cm), Paragraph("Balanço de energia e créditos", styles["DocSection"])]
-    story.append(_key_value_table([
+    energy_rows = [
         ("Energia medida consumida", f"{number_br(audit.consumption_kwh, 2)} kWh"),
+        (
+            f"Consumo anterior - {audit.previous_month_label or 'não identificado'}",
+            f"{number_br(audit.previous_month_consumption_kwh, 2)} kWh" if audit.previous_month_consumption_kwh else "Não disponível",
+        ),
+        ("Comparação mensal", comparison),
         ("Energia injetada medida", injected),
         ("Energia compensada na fatura", f"{number_br(audit.compensated_kwh, 2)} kWh"),
-        ("Saldo de créditos informado", f"{number_br(audit.credit_balance_kwh, 2)} kWh"),
+    ]
+    if "Grupo A" in audit.unit_profile:
+        energy_rows.extend([
+            ("Saldo de créditos - ponta", f"{number_br(audit.credit_balance_peak_kwh, 2)} kWh"),
+            ("Saldo de créditos - fora de ponta", f"{number_br(audit.credit_balance_off_peak_kwh, 2)} kWh"),
+            ("Saldo total de créditos", f"{number_br(audit.credit_balance_kwh, 2)} kWh"),
+        ])
+    else:
+        energy_rows.append(("Saldo de créditos informado", f"{number_br(audit.credit_balance_kwh, 2)} kWh"))
+    energy_rows.extend([
         ("Créditos solares reconhecidos", money(audit.solar_credit_value)),
         ("Fio B / ajuste GD II identificado", money(audit.fio_b_value)),
-    ], styles))
+    ])
+    story.append(_key_value_table(energy_rows, styles))
 
     story += [Spacer(1, 0.3 * cm), Paragraph("Tributos e componentes", styles["DocSection"])]
     tax_data = [
@@ -218,8 +244,8 @@ def generate_bill_audit_pdf(audit: BillAudit, save_path: str | Path | None = Non
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), 5),
         ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
     story.append(taxes)
 
@@ -284,8 +310,8 @@ def generate_bill_audit_pdf(audit: BillAudit, save_path: str | Path | None = Non
             ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
             ("LEFTPADDING", (0, 0), (-1, -1), 4),
             ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
         ]))
         story.append(items_table)
 
@@ -297,8 +323,8 @@ def generate_bill_audit_pdf(audit: BillAudit, save_path: str | Path | None = Non
         *audit.warnings,
     ]
     for note in dict.fromkeys(notes):
-        story.append(Paragraph(f"- {_safe(note)}", styles["DocSmall"]))
-    story += [Spacer(1, 0.2 * cm), _technical_signature(company, styles, include_client=False)]
+        story.append(Paragraph(f"- {_safe(note)}", styles["AuditNote"]))
+    story += [Spacer(1, 0.1 * cm), _technical_signature(company, styles, include_client=False)]
 
     report_code = f"AUD-{audit.unit_code or 'SEM-UC'}-{reference}"
     doc.build(
