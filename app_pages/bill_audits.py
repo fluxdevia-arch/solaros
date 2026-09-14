@@ -186,11 +186,18 @@ with st.container(horizontal=True):
         border=True,
     )
     st.metric("Compensada", f"{number_br(audit.compensated_kwh, 2)} kWh", border=True)
+    st.metric(
+        "Consumo compensado pelo solar",
+        f"{number_br(audit.compensated_percentage, 1)}%",
+        help="Percentual calculado pela energia compensada dividida pela energia medida consumida na fatura.",
+        border=True,
+    )
     if "Grupo A" in audit.unit_profile:
         st.metric("Saldo - ponta", f"{number_br(audit.credit_balance_peak_kwh, 2)} kWh", border=True)
         st.metric("Saldo - fora de ponta", f"{number_br(audit.credit_balance_off_peak_kwh, 2)} kWh", border=True)
+        st.metric("Saldo acumulado total", f"{number_br(audit.credit_balance_kwh, 2)} kWh", border=True)
     else:
-        st.metric("Saldo de créditos", f"{number_br(audit.credit_balance_kwh, 2)} kWh", border=True)
+        st.metric("Saldo acumulado", f"{number_br(audit.credit_balance_kwh, 2)} kWh", border=True)
 st.info(comparison_sentence, icon=":material/compare_arrows:")
 
 if audit.historical_consumption_kwh:

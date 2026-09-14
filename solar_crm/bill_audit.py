@@ -60,6 +60,7 @@ class BillAudit:
     consumption_kwh: float = 0.0
     injected_measured_kwh: float | None = None
     compensated_kwh: float = 0.0
+    compensated_percentage: float = 0.0
     credit_balance_kwh: float = 0.0
     credit_balance_peak_kwh: float = 0.0
     credit_balance_off_peak_kwh: float = 0.0
@@ -451,6 +452,10 @@ def recalculate_audit(audit: BillAudit) -> BillAudit:
         )
     else:
         audit.consumption_variation_pct = None
+    audit.compensated_percentage = round(
+        audit.compensated_kwh / audit.consumption_kwh * 100,
+        2,
+    ) if audit.consumption_kwh > 0 else 0.0
     if audit.credit_balance_peak_kwh or audit.credit_balance_off_peak_kwh:
         audit.credit_balance_kwh = round(audit.credit_balance_peak_kwh + audit.credit_balance_off_peak_kwh, 3)
     audit.findings = _findings(audit)

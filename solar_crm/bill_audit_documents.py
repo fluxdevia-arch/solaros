@@ -214,15 +214,16 @@ def generate_bill_audit_pdf(audit: BillAudit, save_path: str | Path | None = Non
         ("Comparação mensal", comparison),
         ("Energia injetada medida", injected),
         ("Energia compensada na fatura", f"{number_br(audit.compensated_kwh, 2)} kWh"),
+        ("Consumo compensado pela energia solar", f"{number_br(audit.compensated_percentage, 1)}%"),
     ]
     if "Grupo A" in audit.unit_profile:
         energy_rows.extend([
             ("Saldo de créditos - ponta", f"{number_br(audit.credit_balance_peak_kwh, 2)} kWh"),
             ("Saldo de créditos - fora de ponta", f"{number_br(audit.credit_balance_off_peak_kwh, 2)} kWh"),
-            ("Saldo total de créditos", f"{number_br(audit.credit_balance_kwh, 2)} kWh"),
+            ("Saldo acumulado total de créditos", f"{number_br(audit.credit_balance_kwh, 2)} kWh"),
         ])
     else:
-        energy_rows.append(("Saldo de créditos informado", f"{number_br(audit.credit_balance_kwh, 2)} kWh"))
+        energy_rows.append(("Saldo acumulado de créditos", f"{number_br(audit.credit_balance_kwh, 2)} kWh"))
     energy_rows.extend([
         ("Créditos solares reconhecidos", money(audit.solar_credit_value)),
         ("Fio B / ajuste GD II identificado", money(audit.fio_b_value)),
