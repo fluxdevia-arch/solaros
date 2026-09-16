@@ -1534,7 +1534,12 @@ def dashboard_metrics(reference_month: str | None = None) -> dict[str, Any]:
 
 
 def available_months() -> list[str]:
-    rows = query("SELECT DISTINCT reference_month FROM readings ORDER BY reference_month DESC")
+    rows = query(
+        """SELECT reference_month FROM readings
+           UNION
+           SELECT reference_month FROM beneficiary_readings
+           ORDER BY reference_month DESC"""
+    )
     return [row["reference_month"] for row in rows]
 
 

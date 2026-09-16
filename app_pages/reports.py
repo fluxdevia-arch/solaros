@@ -15,8 +15,15 @@ show_flash()
 
 clients = query("SELECT id, name FROM clients WHERE status='Ativo' ORDER BY name")
 months = available_months()
-if not clients or not months:
-    st.warning("É necessário ter clientes, usinas e leituras cadastrados para emitir relatórios.", icon=":material/warning:")
+if not clients:
+    st.warning("Nenhum cliente ativo foi encontrado. Ative ou cadastre um cliente para emitir relatórios.", icon=":material/warning:")
+    st.stop()
+if not months:
+    st.warning(
+        "Seus clientes e usinas estão cadastrados, mas ainda não há leitura mensal. "
+        "Abra 'Leituras e faturas' e lance os dados manualmente, por Excel ou pela fatura PDF da Energisa.",
+        icon=":material/warning:",
+    )
     st.stop()
 
 c_map = client_options(clients)

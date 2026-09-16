@@ -5,6 +5,8 @@ import pandas as pd
 import streamlit as st
 
 from solar_crm.calculations import calculate_coverage, calculate_performance, calculate_savings, money, number_br, percent
+from solar_crm.bill_audit import BillAuditError, analyze_energisa_bill
+from solar_crm.bill_reading_import import beneficiary_values_from_bill, find_bill_target, reading_values_from_bill
 from solar_crm.db import available_months, query, query_df, query_one, upsert_beneficiary_reading, upsert_reading
 from solar_crm.reading_spreadsheet import build_reading_template, read_reading_upload, validate_reading_rows
 from solar_crm.ui import date_br, flash, month_label, page_intro, plant_options, render_delete_control, show_flash
@@ -13,7 +15,7 @@ page_intro("Registre consumo, geração, compensação e valores da concessioná
 show_flash()
 
 plants = query(
-    """SELECT p.id, p.name, p.expected_monthly_kwh, p.client_id, c.name AS client_name
+    """SELECT p.id, p.name, p.unit_code, p.expected_monthly_kwh, p.client_id, c.name AS client_name
        FROM plants p JOIN clients c ON c.id=p.client_id WHERE p.status!='Desativada'
        ORDER BY c.name, p.name"""
 )
@@ -22,9 +24,16 @@ if not plants:
     st.stop()
 
 p_map = plant_options(plants)
+bill_beneficiaries = query(
+    """SELECT b.id, b.plant_id, b.name, b.unit_code, c.name AS client_name, p.name AS plant_name
+       FROM beneficiaries b JOIN plants p ON p.id=b.plant_id
+       JOIN clients c ON c.id=p.client_id WHERE b.status='Ativo'
+       ORDER BY c.name, p.name, b.name"""
+)
 
 with st.container(horizontal=True, horizontal_alignment="right"):
     add_reading = st.popover("Lançar leitura", icon=":material/add_chart:")
+    import_bill = st.popover("Importar fatura PDF", icon=":material/picture_as_pdf:")
     import_data = st.popover("Importar planilha", icon=":material/upload_file:")
     template = build_reading_template(plants, date.today().replace(day=1).isoformat())
     st.download_button(
@@ -76,6 +85,94 @@ with add_reading:
             })
             flash("Leitura salva. Um lançamento do mesmo mês e usina é atualizado automaticamente.")
             st.rerun()
+
+with import_bill:
+    st.caption("Envie uma ou várias faturas originais da Energisa. A UC será vinculada automaticamente ao cadastro existente.")
+    bill_files = st.file_uploader(
+        "Faturas da Energisa em PDF",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="reading_bill_pdf_upload",
+    )
+    bill_candidates = []
+    bill_errors = []
+    for bill_file in bill_files or []:
+        try:
+            audit = analyze_energisa_bill(bill_file.getvalue(), bill_file.name)
+            if not audit.reference_month:
+                bill_errors.append(f"{bill_file.name}: o mês de referência não foi identificado na fatura.")
+                continue
+            target_type, target = find_bill_target(audit.unit_code, plants, bill_beneficiaries)
+            if target is None:
+                bill_errors.append(
+                    f"{bill_file.name}: a UC {audit.unit_code or 'não identificada'} não está cadastrada como usina ou beneficiária."
+                )
+                continue
+            bill_candidates.append((audit, target_type, target))
+        except BillAuditError as exc:
+            bill_errors.append(f"{bill_file.name}: {exc}")
+        except Exception as exc:
+            bill_errors.append(f"{bill_file.name}: não foi possível analisar ({exc}).")
+
+    if bill_candidates:
+        preview_rows = []
+        for audit, target_type, target in bill_candidates:
+            destination = (
+                f"{target['client_name']} · {target['name']}"
+                if target_type == "plant"
+                else f"{target['client_name']} · {target['plant_name']} · beneficiária {target['name']}"
+            )
+            preview_rows.append({
+                "Arquivo": audit.source_filename,
+                "Destino": destination,
+                "UC": audit.unit_code,
+                "Referência": month_label(f"{audit.reference_month[:7]}-01") if audit.reference_month else "Não identificada",
+                "Consumo": audit.consumption_kwh,
+                "Compensada": audit.compensated_kwh,
+                "Saldo": audit.credit_balance_kwh,
+                "Valor": audit.invoice_amount,
+            })
+        st.dataframe(
+            pd.DataFrame(preview_rows),
+            hide_index=True,
+            column_config={
+                "Consumo": st.column_config.NumberColumn(format="%.2f kWh"),
+                "Compensada": st.column_config.NumberColumn(format="%.2f kWh"),
+                "Saldo": st.column_config.NumberColumn(format="%.2f kWh"),
+                "Valor": st.column_config.NumberColumn(format="R$ %.2f"),
+            },
+        )
+        st.info(
+            "Geração do inversor, disponibilidade, falhas e energia destinada às beneficiárias serão preservadas quando já existirem. A fatura não mede esses dados.",
+            icon=":material/info:",
+        )
+        if st.button("Confirmar lançamento das faturas", type="primary", icon=":material/save:", key="save_bill_readings"):
+            saved_plants = 0
+            saved_beneficiaries = 0
+            for audit, target_type, target in bill_candidates:
+                reference_month = f"{audit.reference_month[:7]}-01"
+                if target_type == "plant":
+                    existing = query_one(
+                        "SELECT * FROM readings WHERE plant_id=? AND reference_month=?",
+                        (target["id"], reference_month),
+                    )
+                    upsert_reading(reading_values_from_bill(audit, target, existing))
+                    saved_plants += 1
+                else:
+                    existing = query_one(
+                        "SELECT * FROM beneficiary_readings WHERE beneficiary_id=? AND reference_month=?",
+                        (target["id"], reference_month),
+                    )
+                    upsert_beneficiary_reading(beneficiary_values_from_bill(audit, target, existing))
+                    saved_beneficiaries += 1
+            flash(
+                f"Importação concluída: {saved_plants} leitura(s) de usina e "
+                f"{saved_beneficiaries} leitura(s) de beneficiária atualizadas."
+            )
+            st.rerun()
+
+    for error in bill_errors:
+        st.error(error)
 
 with import_data:
     st.caption("Use o modelo Excel e mantenha os nomes das colunas. Também aceitamos arquivos CSV antigos.")
