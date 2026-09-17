@@ -36,8 +36,10 @@ chartCategoricalColors = ["#0B4A7E", "#F47A16", "#23835B", "#7551A8", "#C43D3D",
 chartSequentialColors = ["#EFF5FA", "#D9E8F3", "#BED8EA", "#98C2DE", "#70A8CE", "#4E8DBB", "#3274A4", "#1E5E8D", "#0B4A7E", "#07385F"]
 
 [theme.sidebar]
-backgroundColor = "#082E4D"
-secondaryBackgroundColor = "#103F65"
-textColor = "#F4F8FB"
-borderColor = "#285879"
+backgroundColor = "#17191C"
+secondaryBackgroundColor = "#24282D"
+textColor = "#F5F7F9"
+linkColor = "#8DBCE4"
+borderColor = "#343A40"
+codeBackgroundColor = "#101214"
 primaryColor = "#FF8A2B"
