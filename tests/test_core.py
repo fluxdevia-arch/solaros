@@ -149,6 +149,7 @@ class DatabaseAndPdfTests(unittest.TestCase):
         settings = query_one("SELECT * FROM settings WHERE id=1")
         self.assertEqual(settings["app_name"], "GRID Engenharia")
         self.assertIn("brand_logo", settings)
+        self.assertEqual(settings["brand_logo_revision"], 2)
         logo_path = configured_logo(settings)
         with Image.open(logo_path) as default_logo:
             self.assertEqual(default_logo.mode, "RGBA")
@@ -162,7 +163,17 @@ class DatabaseAndPdfTests(unittest.TestCase):
         migrated = query_one("SELECT * FROM settings WHERE id=1")
         self.assertEqual(migrated["app_name"], "GRID Engenharia")
         self.assertIsNone(migrated["brand_logo"])
+        self.assertEqual(migrated["brand_logo_revision"], 2)
         self.assertEqual(migrated["share_base_url"], "https://gridengenharia.streamlit.app")
+
+        execute(
+            "UPDATE settings SET app_name='GRID Engenharia', brand_logo=?, brand_logo_mime='image/png', brand_logo_revision=1 WHERE id=1",
+            (b"legacy-grid-logo",),
+        )
+        init_db(seed=False)
+        refreshed = query_one("SELECT * FROM settings WHERE id=1")
+        self.assertIsNone(refreshed["brand_logo"])
+        self.assertEqual(refreshed["brand_logo_revision"], 2)
 
         source = Image.new("RGBA", (2400, 900), (15, 90, 170, 128))
         raw = BytesIO()
@@ -181,6 +192,9 @@ class DatabaseAndPdfTests(unittest.TestCase):
         customized = query_one("SELECT * FROM settings WHERE id=1")
         self.assertEqual(configured_app_name(customized), "Portal Solar Cliente")
         self.assertEqual(configured_logo(customized), normalized)
+        init_db(seed=False)
+        customized_after_restart = query_one("SELECT * FROM settings WHERE id=1")
+        self.assertEqual(configured_logo(customized_after_restart), normalized)
 
     def test_seeded_database_integrity(self):
         from solar_crm.db import connect, init_db

@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS settings (
     app_name TEXT NOT NULL DEFAULT 'GRID Engenharia',
     brand_logo BLOB,
     brand_logo_mime TEXT,
+    brand_logo_revision INTEGER NOT NULL DEFAULT 0,
     company_name TEXT NOT NULL,
     legal_name TEXT,
     document TEXT,
@@ -839,6 +840,18 @@ def init_db(seed: bool = True) -> None:
                    END
                WHERE app_name IN ('SolarOS By OnGrid', 'Solaros By OnGrid')"""
         )
+        # Revision 2 replaces the first GRID mark with the current official
+        # transparent logo. Clear only installations that have not received
+        # this migration; later white-label uploads remain untouched.
+        conn.execute(
+            """UPDATE settings
+               SET brand_logo=NULL,
+                   brand_logo_mime=NULL,
+                   brand_logo_revision=2
+               WHERE id=1
+                 AND app_name='GRID Engenharia'
+                 AND COALESCE(brand_logo_revision, 0) < 2"""
+        )
         conn.execute(
             """UPDATE settings
                SET company_name='SolarOS Energia Solar',
@@ -872,6 +885,7 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
             "app_name": "TEXT NOT NULL DEFAULT 'GRID Engenharia'",
             "brand_logo": "BYTEA",
             "brand_logo_mime": "TEXT",
+            "brand_logo_revision": "INTEGER NOT NULL DEFAULT 0",
             "technical_name": "TEXT",
             "technical_title": "TEXT",
             "technical_registration": "TEXT",
@@ -898,6 +912,7 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
         "app_name": "TEXT NOT NULL DEFAULT 'GRID Engenharia'",
         "brand_logo": "BLOB",
         "brand_logo_mime": "TEXT",
+        "brand_logo_revision": "INTEGER NOT NULL DEFAULT 0",
         "technical_name": "TEXT",
         "technical_title": "TEXT",
         "technical_registration": "TEXT",
