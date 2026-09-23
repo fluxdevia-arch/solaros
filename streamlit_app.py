@@ -9,7 +9,16 @@ from solar_crm import db as db_module
 if int(getattr(db_module, "SCHEMA_VERSION", 0)) < 20:
     db_module = importlib.reload(db_module)
 
-from solar_crm.auth import current_app_user, render_user_sidebar, require_login
+from solar_crm import auth as auth_module
+
+# The hosted process can keep the previous auth module alive while replacing
+# this entrypoint. Reload it when a deployment introduces role management.
+if not hasattr(auth_module, "current_app_user"):
+    auth_module = importlib.reload(auth_module)
+
+current_app_user = auth_module.current_app_user
+render_user_sidebar = auth_module.render_user_sidebar
+require_login = auth_module.require_login
 from solar_crm.branding import configured_app_name, configured_logo
 from solar_crm.config import seed_demo_data
 
