@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -209,6 +209,30 @@ CREATE TABLE IF NOT EXISTS plants (
     warranty_expiry TEXT,
     next_cleaning_date TEXT,
     notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS notification_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_key TEXT NOT NULL UNIQUE,
+    origin TEXT NOT NULL DEFAULT 'Automática',
+    audience TEXT NOT NULL DEFAULT 'Todos',
+    category TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'Média',
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+    plant_id INTEGER REFERENCES plants(id) ON DELETE SET NULL,
+    source_type TEXT,
+    source_id INTEGER,
+    due_date TEXT,
+    recipient_name TEXT,
+    recipient_phone TEXT,
+    recipient_email TEXT,
+    status TEXT NOT NULL DEFAULT 'Nova',
+    read_at TEXT,
+    archived_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS contracts (
@@ -930,6 +954,8 @@ CREATE INDEX IF NOT EXISTS idx_opportunities_stage ON opportunities(stage, next_
 CREATE INDEX IF NOT EXISTS idx_service_orders_status ON service_orders(status, scheduled_date);
 CREATE INDEX IF NOT EXISTS idx_service_orders_token ON service_orders(public_token);
 CREATE INDEX IF NOT EXISTS idx_app_users_role ON app_users(active, role);
+CREATE INDEX IF NOT EXISTS idx_notifications_status ON notification_events(status, severity, due_date);
+CREATE INDEX IF NOT EXISTS idx_notifications_audience ON notification_events(audience, status);
 CREATE INDEX IF NOT EXISTS idx_fault_catalog_lookup ON fault_catalog(manufacturer, symptom_category, active);
 CREATE INDEX IF NOT EXISTS idx_fault_cases_status ON fault_cases(status, observed_at);
 CREATE INDEX IF NOT EXISTS idx_fault_cases_plant ON fault_cases(plant_id, status);
@@ -1824,6 +1850,7 @@ def clear_business_data() -> None:
     """Remove demo/operational records while preserving company settings."""
     conn = connect()
     try:
+        conn.execute("DELETE FROM notification_events")
         conn.execute("DELETE FROM stock_movements")
         conn.execute("DELETE FROM stock_items")
         conn.execute("DELETE FROM maintenance_occurrences")

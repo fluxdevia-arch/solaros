@@ -13,6 +13,7 @@ from streamlit.testing.v1 import AppTest
 
 ALL_PAGE_PATHS = [
     "app_pages/clients.py",
+    "app_pages/notifications.py",
     "app_pages/plants.py",
     "app_pages/readings.py",
     "app_pages/bill_audits.py",

@@ -26,6 +26,7 @@ Sistema profissional para estruturar o pós-venda e o pré-dimensionamento de pr
 - Dashboard com estimativa regional de geração e economia quando a leitura real do mês ainda não foi lançada.
 - Perfis de acesso por usuário: Administrador, Técnico, Financeiro e Comercial, com menus compatíveis com cada função.
 - Aceite digital do cliente nas ordens de serviço e vistorias, com assinatura, documento e data/hora registrados no PDF.
+- Central de notificações para cobranças, atividades, O.S., preventivas, garantias, falhas, estoque e leituras pendentes, com atalho para WhatsApp.
 - Relatório fotográfico de vistoria em PDF com identidade visual configurável, resultados destacados e assinatura técnica padronizada.
 - Gerador de contratos para pós-venda, manutenção, consultoria e projetos, com histórico e PDF.
 - Cálculo de cobertura, desempenho, disponibilidade e economia estimada.

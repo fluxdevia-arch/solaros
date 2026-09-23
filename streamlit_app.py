@@ -1,4 +1,5 @@
 import importlib
+from datetime import datetime, timedelta
 
 import streamlit as st
 
@@ -6,7 +7,7 @@ from solar_crm import db as db_module
 
 # Streamlit can hot-reload the entrypoint while keeping imported modules alive.
 # Reload an older database module before running a newly deployed migration.
-if int(getattr(db_module, "SCHEMA_VERSION", 0)) < 20:
+if int(getattr(db_module, "SCHEMA_VERSION", 0)) < 21:
     db_module = importlib.reload(db_module)
 
 from solar_crm import auth as auth_module
@@ -90,9 +91,25 @@ if field_inspection_mode:
     field_page.run()
     st.stop()
 
+notification_count = 0
+try:
+    from solar_crm.notifications import notification_counts, refresh_automatic_notifications
+
+    last_refresh = st.session_state.get("notifications_refreshed_at")
+    if not isinstance(last_refresh, datetime) or datetime.now() - last_refresh >= timedelta(minutes=5):
+        refresh_automatic_notifications()
+        st.session_state["notifications_refreshed_at"] = datetime.now()
+    notification_count = notification_counts(role=app_user.get("role") or "Administrador")["new"]
+except Exception:
+    # Notification failures must never block operational access to the CRM.
+    notification_count = 0
+
+notification_title = f"Notificações ({notification_count})" if notification_count else "Notificações"
+
 all_pages = {
     "Gestão": [
         st.Page("app_pages/dashboard.py", title="Visão geral", icon=":material/space_dashboard:"),
+        st.Page("app_pages/notifications.py", title=notification_title, icon=":material/notifications:"),
         st.Page("app_pages/clients.py", title="Clientes e contratos", icon=":material/groups:"),
         st.Page("app_pages/plants.py", title="Usinas", icon=":material/solar_power:"),
     ],
