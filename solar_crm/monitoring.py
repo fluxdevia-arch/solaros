@@ -63,6 +63,63 @@ class SyncResult:
     performance_pct: float
 
 
+@dataclass(frozen=True)
+class ProviderProfile:
+    portal_name: str
+    credential_summary: str
+    key_label: str
+    secret_label: str
+    key_placeholder: str
+    secret_placeholder: str
+    setup_steps: tuple[str, ...]
+    documentation_url: str = ""
+
+
+PROVIDER_PROFILES = {
+    SOLARZ: ProviderProfile(
+        portal_name="SolarZ Monitoramento",
+        credential_summary="Usuário de API + senha de API",
+        key_label="Usuário de API",
+        secret_label="Senha da API",
+        key_placeholder="Usuário gerado no menu Usuário de API",
+        secret_placeholder="Senha exibida no momento da geração",
+        setup_steps=(
+            "Entre no SolarZ com a conta administradora.",
+            "Acesse Configurações > Usuário de API > Gerar Usuário de API.",
+            "Copie o usuário e a senha gerados. Não use o e-mail e a senha comuns do portal.",
+        ),
+        documentation_url="https://monitoramento.ajuda.solarz.com.br/monitoramento/api-solarz",
+    ),
+    GROWATT: ProviderProfile(
+        portal_name="Growatt OpenAPI",
+        credential_summary="API Token",
+        key_label="",
+        secret_label="API Token",
+        key_placeholder="",
+        secret_placeholder="Token gerado para acesso à OpenAPI",
+        setup_steps=(
+            "Entre no portal Growatt da conta instaladora.",
+            "Solicite ou gere o token de acesso à OpenAPI para essa conta.",
+            "Cole somente o token abaixo; o login e a senha comuns não funcionam neste conector.",
+        ),
+        documentation_url="https://openapi.growatt.com/",
+    ),
+    SOLIS: ProviderProfile(
+        portal_name="SolisCloud",
+        credential_summary="API ID + API Secret",
+        key_label="API ID",
+        secret_label="API Secret",
+        key_placeholder="KeyID / API ID da SolisCloud",
+        secret_placeholder="API Secret correspondente",
+        setup_steps=(
+            "Entre na SolisCloud com a conta proprietária ou instaladora.",
+            "Ative o acesso de API e gere o par API ID / API Secret.",
+            "Copie os dois valores exatamente como foram gerados; não use a senha comum do portal.",
+        ),
+    ),
+}
+
+
 def _validated_base_url(value: str) -> str:
     parsed = urlparse(value.strip())
     if parsed.scheme != "https" or not parsed.netloc:
@@ -115,11 +172,16 @@ def _check_response(response: requests.Response, provider: str) -> Any:
     except requests.RequestException as exc:
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
         if status_code in {401, 403}:
-            message = "credencial recusada. Gere um Usuário de API na SolarZ e substitua o usuário e a senha cadastrados."
+            credential_help = {
+                SOLARZ: "Gere um Usuário de API na SolarZ; o e-mail e a senha comuns do portal não funcionam.",
+                GROWATT: "Confirme se o API Token está ativo e pertence à conta instaladora correta.",
+                SOLIS: "Confirme o par API ID / API Secret e se o acesso de API está habilitado na SolisCloud.",
+            }.get(provider, "Confira a credencial e a permissão da conta.")
+            message = f"credencial recusada. {credential_help}"
         elif status_code == 400:
-            message = "a SolarZ recusou os parâmetros da consulta. O conector foi ajustado ao schema oficial; tente novamente."
+            message = "o portal recusou os parâmetros enviados. Confira se a credencial pertence ao portal selecionado e tente novamente."
         elif status_code == 404:
-            message = "rota da API não encontrada. Confirme se o endereço cadastrado é https://app.solarz.com.br."
+            message = f"rota da API não encontrada. Confirme o endereço do conector: {DEFAULT_URLS.get(provider, 'URL oficial do portal')}."
         else:
             message = f"falha HTTP ao acessar o portal ({exc})."
         raise MonitoringError(f"{provider}: {message}", status_code=status_code) from exc
@@ -377,6 +439,77 @@ def _connector(integration: dict[str, Any]):
     raise MonitoringError(f"O provedor {provider} ainda não possui conector ativo.")
 
 
+def validate_credentials(
+    provider: str,
+    base_url: str,
+    credential_key: str,
+    credential_secret: str,
+) -> list[RemotePlant]:
+    """Validate raw credentials without saving them and return visible plants."""
+    if provider not in SUPPORTED_PROVIDERS:
+        raise MonitoringError("Provedor de monitoramento não suportado.")
+    url = _validated_base_url(base_url or DEFAULT_URLS[provider])
+    if provider == SOLARZ:
+        client = SolarZClient(credential_key, credential_secret, url)
+    elif provider == GROWATT:
+        client = GrowattClient(credential_secret, url)
+    else:
+        client = SolisClient(credential_key, credential_secret, url)
+    return client.list_plants()
+
+
+def _store_remote_plants(integration_id: int, plants: list[RemotePlant]) -> None:
+    conn = connect()
+    try:
+        for plant in plants:
+            conn.execute(
+                """INSERT INTO remote_plants
+                   (integration_id, remote_plant_id, name, capacity_kwp, current_power_kw,
+                    total_energy_kwh, remote_status, discovered_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(integration_id, remote_plant_id) DO UPDATE SET
+                     name=excluded.name, capacity_kwp=excluded.capacity_kwp,
+                     current_power_kw=excluded.current_power_kw,
+                     total_energy_kwh=excluded.total_energy_kwh,
+                     remote_status=excluded.remote_status, discovered_at=excluded.discovered_at""",
+                (
+                    integration_id, plant.remote_id, plant.name, plant.capacity_kwp,
+                    plant.current_power_kw, plant.total_energy_kwh, plant.status, now_iso(),
+                ),
+            )
+        conn.execute(
+            "UPDATE monitoring_integrations SET status='Conectada', last_error=NULL WHERE id=?",
+            (integration_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def connect_and_discover(
+    name: str,
+    provider: str,
+    base_url: str,
+    credential_key: str,
+    credential_secret: str,
+    sync_interval_minutes: int = 60,
+) -> tuple[int, list[RemotePlant]]:
+    """Validate first, then securely save the account and imported plants."""
+    if not name.strip():
+        raise MonitoringError("Informe um nome para identificar esta conexão.")
+    plants = validate_credentials(provider, base_url, credential_key, credential_secret)
+    integration_id = create_integration(
+        name,
+        provider,
+        base_url,
+        credential_key,
+        credential_secret,
+        sync_interval_minutes,
+    )
+    _store_remote_plants(integration_id, plants)
+    return integration_id, plants
+
+
 def create_integration(name: str, provider: str, base_url: str, credential_key: str, credential_secret: str, sync_interval_minutes: int = 60) -> int:
     if provider not in SUPPORTED_PROVIDERS:
         raise MonitoringError("Provedor de monitoramento não suportado.")
@@ -432,31 +565,7 @@ def discover_remote_plants(integration_id: int) -> list[RemotePlant]:
         raise MonitoringError("Conexão não encontrada.")
     try:
         plants = _connector(integration).list_plants()
-        conn = connect()
-        try:
-            for plant in plants:
-                conn.execute(
-                    """INSERT INTO remote_plants
-                       (integration_id, remote_plant_id, name, capacity_kwp, current_power_kw,
-                        total_energy_kwh, remote_status, discovered_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                       ON CONFLICT(integration_id, remote_plant_id) DO UPDATE SET
-                         name=excluded.name, capacity_kwp=excluded.capacity_kwp,
-                         current_power_kw=excluded.current_power_kw,
-                         total_energy_kwh=excluded.total_energy_kwh,
-                         remote_status=excluded.remote_status, discovered_at=excluded.discovered_at""",
-                    (
-                        integration_id, plant.remote_id, plant.name, plant.capacity_kwp,
-                        plant.current_power_kw, plant.total_energy_kwh, plant.status, now_iso(),
-                    ),
-                )
-            conn.execute(
-                "UPDATE monitoring_integrations SET status='Conectada', last_error=NULL WHERE id=?",
-                (integration_id,),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        _store_remote_plants(integration_id, plants)
         return plants
     except Exception as exc:
         execute(
@@ -480,6 +589,40 @@ def link_plant(plant_id: int, integration_id: int, remote_plant_id: str, remote_
              status='Ativo', last_error=NULL""",
         (plant_id, integration_id, remote_plant_id.strip(), remote_device_sn.strip()),
     )
+
+
+def import_remote_plant(integration_id: int, remote_plant_id: str, client_id: int) -> int:
+    """Create a local CRM plant from a discovered portal plant and link it."""
+    remote = query_one(
+        """SELECT rp.*, mi.provider FROM remote_plants rp
+           JOIN monitoring_integrations mi ON mi.id=rp.integration_id
+           WHERE rp.integration_id=? AND rp.remote_plant_id=?""",
+        (int(integration_id), remote_plant_id.strip()),
+    )
+    if not remote:
+        raise MonitoringError("A usina importada não foi encontrada. Atualize a conexão e tente novamente.")
+    existing = query_one(
+        "SELECT plant_id FROM plant_integrations WHERE integration_id=? AND remote_plant_id=? AND status='Ativo'",
+        (int(integration_id), remote_plant_id.strip()),
+    )
+    if existing:
+        raise MonitoringError("Esta usina do portal já está vinculada ao GRID Engenharia.")
+    client = query_one("SELECT id FROM clients WHERE id=? AND status='Ativo'", (int(client_id),))
+    if not client:
+        raise MonitoringError("Selecione um cliente ativo para receber a usina importada.")
+    plant_id = execute(
+        """INSERT INTO plants
+           (client_id, name, installed_kwp, expected_monthly_kwh, status, notes)
+           VALUES (?, ?, ?, 0, 'Operando', ?)""",
+        (
+            int(client_id),
+            remote["name"],
+            float(remote["capacity_kwp"] or 0),
+            f"Importada automaticamente de {remote['provider']} · ID remoto {remote_plant_id}",
+        ),
+    )
+    link_plant(plant_id, int(integration_id), remote_plant_id)
+    return plant_id
 
 
 def sync_mapping(mapping_id: int, reference_month: str) -> SyncResult:

@@ -7,13 +7,13 @@ from solar_crm.calculations import number_br, percent
 from solar_crm.db import query, query_df
 from solar_crm.monitoring import (
     DEFAULT_URLS,
-    GROWATT,
+    PROVIDER_PROFILES,
     SOLARZ,
-    SOLIS,
     SUPPORTED_PROVIDERS,
     MonitoringError,
-    create_integration,
+    connect_and_discover,
     discover_remote_plants,
+    import_remote_plant,
     link_plant,
     sync_mapping,
     update_integration_credentials,
@@ -54,154 +54,197 @@ with st.container(horizontal=True):
     st.metric("Conexões com erro", errors, border=True)
 
 accounts_tab, mapping_tab, sync_tab, history_tab = st.tabs([
-    ":material/key: Contas de API",
-    ":material/link: Vincular usinas",
+    ":material/hub: Conexões",
+    ":material/solar_power: Usinas importadas",
     ":material/sync: Sincronizar",
     ":material/history: Histórico",
 ])
 
 with accounts_tab:
-    with st.container(border=True):
-        st.subheader("SolarZ Monitoramento · integração principal", icon=":material/verified:")
-        st.write(
-            "Centralize usinas de diferentes fabricantes em uma única conta e envie ao sistema "
-            "a geração diária e a meta de geração usada no desempenho mensal."
-        )
-        st.success("Conector oficial ativo no sistema.", icon=":material/check_circle:")
-        st.markdown(
-            "Para conectar, gere as credenciais em **SolarZ > Configurações > Usuário de API > Gerar Usuário de API**. "
-            "A senha aparece uma única vez. [Abrir orientação oficial da SolarZ](https://monitoramento.ajuda.solarz.com.br/monitoramento/api-solarz)"
+    st.subheader("Conecte seus portais de monitoramento", icon=":material/hub:")
+    st.caption(
+        "Escolha o portal, informe a credencial específica e deixe o GRID validar o acesso antes de salvar. "
+        "Uma conexão pode importar várias usinas."
+    )
+
+    with st.container(horizontal=True, wrap=True):
+        for step, label in enumerate(("Escolher o portal", "Informar credencial", "Validar acesso", "Importar usinas"), start=1):
+            with st.container(border=True, width=205):
+                st.badge(f"Passo {step}", color="blue")
+                st.write(label)
+
+    provider_columns = st.columns(len(SUPPORTED_PROVIDERS))
+    for column, provider_name in zip(provider_columns, SUPPORTED_PROVIDERS):
+        profile = PROVIDER_PROFILES[provider_name]
+        with column.container(border=True, height="stretch"):
+            st.subheader(profile.portal_name, icon=":material/cloud:")
+            st.badge("Conector ativo", color="green", icon=":material/check:")
+            st.caption(profile.credential_summary)
+
+    st.subheader("Nova conexão", icon=":material/add_link:")
+    provider = st.segmented_control(
+        "Portal ou fabricante",
+        SUPPORTED_PROVIDERS,
+        default=SUPPORTED_PROVIDERS[0],
+        required=True,
+        key="new_integration_provider",
+        width="stretch",
+        wrap=True,
+    )
+    profile = PROVIDER_PROFILES[provider]
+
+    guide_column, form_column = st.columns([0.9, 1.5], vertical_alignment="top")
+    with guide_column.container(border=True, height="stretch"):
+        st.subheader("Onde conseguir a credencial", icon=":material/help:")
+        for position, instruction in enumerate(profile.setup_steps, start=1):
+            st.write(f"**{position}.** {instruction}")
+        if profile.documentation_url:
+            st.link_button(
+                "Abrir orientação do portal",
+                profile.documentation_url,
+                icon=":material/open_in_new:",
+            )
+        st.warning(
+            "A senha comum usada para entrar no site do fabricante geralmente não é uma credencial de API.",
+            icon=":material/key:",
         )
 
-    with st.expander("Outros conectores diretos", icon=":material/hub:"):
-        supported_left, supported_right = st.columns(2)
-        with supported_left.container(border=True):
-            st.subheader("Growatt OpenAPI", icon=":material/check_circle:")
-            st.write("Conector direto para descoberta de usinas e geração diária/mensal.")
-            st.caption("Credencial necessária: API Token do portal Growatt.")
-        with supported_right.container(border=True):
-            st.subheader("SolisCloud", icon=":material/check_circle:")
-            st.write("Conector direto com assinatura segura HMAC-SHA1 e energia diária.")
-            st.caption("Credenciais necessárias: API ID e API Secret.")
-
-    with st.expander("Adicionar conta de monitoramento", icon=":material/add:"):
-        provider = st.selectbox("Fabricante / portal", SUPPORTED_PROVIDERS, key="new_integration_provider")
+    with form_column.container(border=True, height="stretch"):
+        st.subheader(f"Conectar {profile.portal_name}", icon=":material/login:")
         with st.form(f"new_integration_{provider}"):
             connection_name = st.text_input(
-                "Nome da conexão",
-                placeholder="Ex.: SolarZ principal" if provider == SOLARZ else "Ex.: Conta do instalador",
+                "Nome desta conexão",
+                placeholder=f"Ex.: {profile.portal_name} principal",
+                help="Use um nome fácil de reconhecer caso tenha mais de uma conta no mesmo portal.",
             )
-            base_url = st.text_input("Endereço da API", value=DEFAULT_URLS[provider])
-            key_label = "Usuário de API" if provider == SOLARZ else "API ID"
-            key_help = (
-                "Usuário exclusivo gerado na área Usuário de API da SolarZ."
-                if provider == SOLARZ
-                else "Na Growatt este campo não é utilizado. Na SolisCloud, informe o KeyID/API ID."
-            )
-            api_id = st.text_input(
-                key_label,
-                disabled=provider == GROWATT,
-                help=key_help,
-            )
-            secret_label = "Senha da API" if provider == SOLARZ else ("API Token" if provider == GROWATT else "API Secret")
+            api_id = ""
+            if profile.key_label:
+                api_id = st.text_input(
+                    profile.key_label,
+                    placeholder=profile.key_placeholder,
+                )
             secret = st.text_input(
-                secret_label,
+                profile.secret_label,
                 type="password",
-                help="A credencial será protegida pelo Windows e nunca será exibida em relatórios.",
+                placeholder=profile.secret_placeholder,
+                help="A credencial será criptografada e nunca aparecerá nos relatórios.",
             )
-            interval = st.number_input("Intervalo planejado de sincronização (minutos)", min_value=15, value=60, step=15)
-            if st.form_submit_button("Salvar conexão", type="primary", icon=":material/lock:"):
-                try:
-                    create_integration(connection_name, provider, base_url, api_id, secret, int(interval))
-                    flash("Conexão salva com a credencial protegida. Agora teste o acesso ao portal.")
-                    st.rerun()
-                except MonitoringError as exc:
-                    st.error(str(exc))
+            with st.expander("Configuração avançada", icon=":material/tune:"):
+                base_url = st.text_input("Endereço oficial da API", value=DEFAULT_URLS[provider])
+                interval = st.number_input(
+                    "Intervalo planejado de sincronização (minutos)",
+                    min_value=15,
+                    value=60,
+                    step=15,
+                )
+            submitted = st.form_submit_button(
+                "Conectar, validar e importar usinas",
+                type="primary",
+                icon=":material/cloud_sync:",
+            )
+        if submitted:
+            try:
+                with st.status("Validando a credencial no portal...", expanded=True) as status:
+                    st.write("Conferindo o endereço oficial da API")
+                    st.write("Autenticando sem salvar a credencial")
+                    _, found = connect_and_discover(
+                        connection_name,
+                        provider,
+                        base_url,
+                        api_id,
+                        secret,
+                        int(interval),
+                    )
+                    st.write(f"Importando {len(found)} usina(s) disponível(is) para esta conta")
+                    status.update(label="Portal conectado com sucesso", state="complete", expanded=False)
+                if found:
+                    flash(f"Conexão validada e {len(found)} usina(s) importada(s).")
+                else:
+                    flash(
+                        "A conexão foi validada, mas o portal não liberou usinas para esta credencial. "
+                        "Confira as permissões da conta.",
+                        kind="warning",
+                    )
+                st.rerun()
+            except MonitoringError as exc:
+                st.error(str(exc), icon=":material/error:")
+                st.caption("Nada foi salvo. Corrija a credencial ou a permissão indicada e tente novamente.")
 
     if connections:
-        st.subheader("Contas cadastradas", icon=":material/cloud_done:")
-        account_df = pd.DataFrame(connections).rename(columns={
-            "name": "Conexão",
-            "provider": "Portal",
-            "base_url": "Endereço",
-            "credential_hint": "Credencial",
-            "status": "Status",
-            "sync_interval_minutes": "Intervalo (min)",
-            "last_sync_at": "Última sincronização",
-            "last_sync_status": "Resultado",
-            "last_error": "Último erro",
-        })[["Conexão", "Portal", "Endereço", "Credencial", "Status", "Intervalo (min)", "Última sincronização", "Resultado", "Último erro"]]
-        st.dataframe(account_df, hide_index=True)
+        st.subheader("Portais conectados", icon=":material/cloud_done:")
+        for row in connections:
+            with st.container(border=True):
+                summary, status_area, actions = st.columns([1.6, 0.8, 1.1], vertical_alignment="center")
+                with summary:
+                    st.subheader(row["name"])
+                    st.caption(f"{row['provider']} · credencial {row['credential_hint']} · sincronização a cada {row['sync_interval_minutes']} min")
+                with status_area:
+                    badge_color = "green" if row["status"] == "Conectada" else ("red" if row["status"] == "Erro" else "blue")
+                    st.badge(row["status"], color=badge_color)
+                    if row["last_sync_at"]:
+                        st.caption(f"Última sincronização: {date_br(row['last_sync_at'][:10])}")
+                with actions:
+                    if st.button(
+                        "Atualizar usinas",
+                        icon=":material/refresh:",
+                        key=f"refresh_integration_{row['id']}",
+                    ):
+                        try:
+                            with st.spinner(f"Consultando {row['provider']}..."):
+                                found = discover_remote_plants(row["id"])
+                            flash(f"{len(found)} usina(s) atualizada(s) em {row['name']}.")
+                            st.rerun()
+                        except MonitoringError as exc:
+                            st.error(str(exc), icon=":material/error:")
+                if row["last_error"]:
+                    st.error(row["last_error"], icon=":material/error:")
 
         connection_map = {f"{row['name']} · {row['provider']}": row["id"] for row in connections}
-        selected_connection = st.selectbox("Conta para testar", list(connection_map), key="connection_test")
-        with st.container(horizontal=True):
-            if st.button("Testar e buscar usinas", type="primary", icon=":material/travel_explore:"):
-                try:
-                    with st.spinner("Consultando o portal do fabricante..."):
-                        found = discover_remote_plants(connection_map[selected_connection])
-                    if found:
-                        st.success(f"Conexão validada. {len(found)} usina(s) encontrada(s).", icon=":material/check_circle:")
-                        st.dataframe(
-                            pd.DataFrame([{
-                                "Usina remota": row.name,
-                                "ID remoto": row.remote_id,
-                                "Potência": row.capacity_kwp,
-                                "Potência atual": row.current_power_kw,
-                                "Energia acumulada": row.total_energy_kwh,
-                                "Status": row.status,
-                            } for row in found]),
-                            hide_index=True,
-                            column_config={
-                                "Potência": st.column_config.NumberColumn(format="%.2f kWp"),
-                                "Potência atual": st.column_config.NumberColumn(format="%.2f kW"),
-                                "Energia acumulada": st.column_config.NumberColumn(format="%.0f kWh"),
-                            },
-                        )
-                    else:
-                        st.warning(
-                            "A autenticação funcionou, mas a SolarZ não devolveu usinas para este Usuário de API. "
-                            "Confirme no SolarZ se o usuário possui acesso às usinas e teste novamente.",
-                            icon=":material/info:",
-                        )
-                except MonitoringError as exc:
-                    st.error(str(exc))
-
-        with st.expander("Substituir credenciais", icon=":material/password:"):
-            credential_connection = st.selectbox("Conta", list(connection_map), key="credential_connection")
-            credential_row = next(row for row in connections if row["id"] == connection_map[credential_connection])
-            with st.form("replace_api_credentials"):
-                replace_key_label = "Novo usuário de API" if credential_row["provider"] == SOLARZ else "Novo API ID"
-                replace_secret_label = "Nova senha da API" if credential_row["provider"] == SOLARZ else "Novo token ou API Secret"
-                new_api_id = st.text_input(replace_key_label, type="password", disabled=credential_row["provider"] == GROWATT)
-                new_secret = st.text_input(replace_secret_label, type="password")
-                st.caption("Campos vazios preservam a credencial atual.")
+        with st.expander("Administrar uma conexão", icon=":material/settings:"):
+            selected_connection = st.selectbox("Conexão", list(connection_map), key="connection_admin")
+            credential_row = next(row for row in connections if row["id"] == connection_map[selected_connection])
+            credential_profile = PROVIDER_PROFILES[credential_row["provider"]]
+            st.caption("Preencha apenas o que deseja substituir. Campos vazios preservam a credencial atual.")
+            with st.form(f"replace_api_credentials_{credential_row['id']}"):
+                new_api_id = ""
+                if credential_profile.key_label:
+                    new_api_id = st.text_input(
+                        f"Novo {credential_profile.key_label}",
+                        type="password",
+                    )
+                new_secret = st.text_input(
+                    f"Novo {credential_profile.secret_label}",
+                    type="password",
+                )
                 if st.form_submit_button("Atualizar credenciais", icon=":material/lock_reset:"):
                     try:
                         update_integration_credentials(credential_row["id"], new_api_id, new_secret)
-                        flash("Credenciais atualizadas com segurança.")
+                        flash("Credenciais atualizadas. Use Atualizar usinas para validar o novo acesso.")
                         st.rerun()
                     except MonitoringError as exc:
                         st.error(str(exc))
-        connection_to_delete = next(row for row in connections if row["id"] == connection_map[selected_connection])
-        render_delete_control(
-            "integration",
-            connection_to_delete["id"],
-            f"conta de integração {connection_to_delete['name']}",
-            extra_warning="As credenciais, usinas remotas, vínculos e o histórico desta conta serão removidos.",
-        )
+            render_delete_control(
+                "integration",
+                credential_row["id"],
+                f"conta de integração {credential_row['name']}",
+                extra_warning="As credenciais, usinas remotas, vínculos e o histórico desta conta serão removidos.",
+            )
     else:
-        st.info("Cadastre a primeira conta de API para iniciar a integração.", icon=":material/info:")
-
-    with st.container(border=True):
-        st.subheader("Estratégia de integração", icon=":material/route:")
-        st.write("O SolarZ passa a ser o caminho recomendado para reunir fabricantes diferentes em uma só integração.")
-        st.write("Conectores diretos adicionais poderão ser mantidos para contas que não estejam cadastradas no SolarZ.")
+        st.info(
+            "Nenhum portal conectado. Escolha um dos conectores acima para importar as primeiras usinas.",
+            icon=":material/info:",
+        )
 
 with mapping_tab:
     remote_plants = query(
-        """SELECT rp.*, mi.name AS integration_name, mi.provider
-           FROM remote_plants rp JOIN monitoring_integrations mi ON mi.id=rp.integration_id
+        """SELECT rp.*, mi.name AS integration_name, mi.provider,
+                  pi.plant_id, p.name AS local_plant_name, c.name AS client_name
+           FROM remote_plants rp
+           JOIN monitoring_integrations mi ON mi.id=rp.integration_id
+           LEFT JOIN plant_integrations pi ON pi.integration_id=rp.integration_id
+              AND pi.remote_plant_id=rp.remote_plant_id AND pi.status='Ativo'
+           LEFT JOIN plants p ON p.id=pi.plant_id
+           LEFT JOIN clients c ON c.id=p.client_id
            ORDER BY mi.name, rp.name"""
     )
     local_plants = query(
@@ -209,30 +252,105 @@ with mapping_tab:
            JOIN clients c ON c.id=p.client_id WHERE p.status!='Desativada'
            ORDER BY c.name, p.name"""
     )
+    clients = query("SELECT id, name FROM clients WHERE status='Ativo' ORDER BY name")
     if not remote_plants:
-        st.info("Na aba Contas de API, teste a conexão para buscar as usinas do fabricante.", icon=":material/info:")
-    elif not local_plants:
-        st.warning("Cadastre uma usina no sistema antes de criar o vínculo.", icon=":material/warning:")
+        st.info(
+            "Conecte um portal na aba Conexões. As usinas liberadas pela credencial aparecerão aqui automaticamente.",
+            icon=":material/info:",
+        )
     else:
-        st.subheader("Correspondência entre as usinas", icon=":material/link:")
-        st.caption("Cada usina do sistema pode apontar para uma usina remota. Isso impede duplicidade de geração.")
-        local_map = plant_options(local_plants)
+        linked_count = sum(1 for row in remote_plants if row["plant_id"])
+        with st.container(horizontal=True):
+            st.metric("Importadas dos portais", len(remote_plants), border=True)
+            st.metric("Já vinculadas ao GRID", linked_count, border=True)
+            st.metric("Aguardando vínculo", len(remote_plants) - linked_count, border=True)
+
+        imported_df = pd.DataFrame([{
+            "Portal": row["provider"],
+            "Conta": row["integration_name"],
+            "Usina importada": row["name"],
+            "Potência (kWp)": row["capacity_kwp"],
+            "Energia acumulada (kWh)": row["total_energy_kwh"],
+            "Status remoto": row["remote_status"],
+            "Cadastro no GRID": (
+                f"{row['local_plant_name']} · {row['client_name']}" if row["plant_id"] else "Aguardando vínculo"
+            ),
+        } for row in remote_plants])
+        st.dataframe(
+            imported_df,
+            hide_index=True,
+            column_config={
+                "Potência (kWp)": st.column_config.NumberColumn(format="%.2f kWp"),
+                "Energia acumulada (kWh)": st.column_config.NumberColumn(format="%.0f kWh"),
+            },
+        )
+
+        unlinked = [row for row in remote_plants if not row["plant_id"]]
         remote_map = {
             f"{row['integration_name']} · {row['name']} · ID {row['remote_plant_id']}": row
-            for row in remote_plants
+            for row in unlinked
         }
-        with st.form("link_monitoring_plant"):
-            local_label = st.selectbox("Usina no sistema", list(local_map))
-            remote_label = st.selectbox("Usina encontrada no portal", list(remote_map))
-            device_sn = st.text_input("Número de série do inversor/datalogger", help="Opcional nesta etapa; útil para alarmes por equipamento.")
-            if st.form_submit_button("Vincular usinas", type="primary", icon=":material/link:"):
-                remote = remote_map[remote_label]
-                try:
-                    link_plant(local_map[local_label], remote["integration_id"], remote["remote_plant_id"], device_sn)
-                    flash("Usina vinculada ao portal de monitoramento.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Não foi possível criar o vínculo: {exc}")
+        if remote_map:
+            st.subheader("Concluir a importação", icon=":material/link:")
+            st.caption(
+                "Escolha uma usina importada e diga se ela já existe no GRID ou se deve ser cadastrada agora."
+            )
+            remote_label = st.selectbox("Usina importada", list(remote_map), key="remote_plant_to_link")
+            remote = remote_map[remote_label]
+            link_mode = st.segmented_control(
+                "O que deseja fazer?",
+                ["Criar uma nova usina no GRID", "Vincular a uma usina já cadastrada"],
+                default="Criar uma nova usina no GRID",
+                required=True,
+                key="remote_link_mode",
+                wrap=True,
+            )
+            if link_mode == "Criar uma nova usina no GRID":
+                if not clients:
+                    st.warning("Cadastre primeiro o cliente que será o proprietário desta usina.", icon=":material/warning:")
+                else:
+                    client_map = {row["name"]: row["id"] for row in clients}
+                    with st.form("import_remote_as_new_plant"):
+                        client_label = st.selectbox("Cliente proprietário", list(client_map))
+                        st.caption(
+                            f"O GRID criará a usina **{remote['name']}** com {number_br(remote['capacity_kwp'], 2)} kWp. "
+                            "Os demais dados técnicos poderão ser completados depois na ficha da usina."
+                        )
+                        if st.form_submit_button("Criar e vincular usina", type="primary", icon=":material/add_link:"):
+                            try:
+                                import_remote_plant(
+                                    remote["integration_id"],
+                                    remote["remote_plant_id"],
+                                    client_map[client_label],
+                                )
+                                flash("Usina criada no GRID e vinculada ao portal.")
+                                st.rerun()
+                            except MonitoringError as exc:
+                                st.error(str(exc))
+            elif not local_plants:
+                st.warning("Não há usinas locais disponíveis. Use a opção de criar uma nova usina.", icon=":material/warning:")
+            else:
+                local_map = plant_options(local_plants)
+                with st.form("link_monitoring_plant"):
+                    local_label = st.selectbox("Usina já cadastrada no GRID", list(local_map))
+                    device_sn = st.text_input(
+                        "Número de série do inversor/datalogger",
+                        help="Opcional nesta etapa; útil para alarmes por equipamento.",
+                    )
+                    if st.form_submit_button("Vincular usinas", type="primary", icon=":material/link:"):
+                        try:
+                            link_plant(
+                                local_map[local_label],
+                                remote["integration_id"],
+                                remote["remote_plant_id"],
+                                device_sn,
+                            )
+                            flash("Usina vinculada ao portal de monitoramento.")
+                            st.rerun()
+                        except MonitoringError as exc:
+                            st.error(str(exc))
+        else:
+            st.success("Todas as usinas importadas já estão vinculadas ao GRID Engenharia.", icon=":material/check_circle:")
 
     if mappings:
         linked_df = pd.DataFrame(mappings).rename(columns={
@@ -334,4 +452,7 @@ with history_tab:
             },
         )
 
-st.caption("Segurança: as credenciais são criptografadas pelo Windows para o usuário atual e nunca são incluídas em exportações, tabelas ou relatórios de clientes.")
+st.caption(
+    "Segurança: as credenciais são criptografadas com a chave protegida do ambiente e nunca são incluídas "
+    "em exportações, tabelas ou relatórios de clientes."
+)

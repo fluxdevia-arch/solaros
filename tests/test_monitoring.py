@@ -12,8 +12,10 @@ from solar_crm.monitoring import (
     RemotePlant,
     SolarZClient,
     SolisClient,
+    connect_and_discover,
     create_integration,
     discover_remote_plants,
+    import_remote_plant,
     link_plant,
     sync_mapping,
 )
@@ -141,6 +143,17 @@ class MonitoringTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "credencial recusada"):
             SolarZClient("usuario-api", "senha-api", session=UnauthorizedSession()).list_plants()
 
+    def test_growatt_error_does_not_tell_user_to_change_solarz_credentials(self):
+        from solar_crm.monitoring import GrowattClient
+
+        class UnauthorizedSession:
+            def get(self, url, **kwargs):
+                return _FakeResponse({}, status_code=401)
+
+        with self.assertRaisesRegex(Exception, "API Token") as raised:
+            GrowattClient("token-invalido", session=UnauthorizedSession()).list_plants()
+        self.assertNotIn("Usuário de API na SolarZ", str(raised.exception))
+
     def test_solarz_is_the_primary_provider(self):
         from solar_crm.monitoring import SUPPORTED_PROVIDERS
 
@@ -179,6 +192,74 @@ class MonitoringTests(unittest.TestCase):
         self.assertIn("Growatt", reading["meter_reading"])
         self.assertEqual(query_one("SELECT COUNT(*) AS value FROM telemetry_daily")["value"], 2)
         self.assertEqual(query_one("SELECT status FROM integration_sync_logs ORDER BY id DESC")["status"], "Sucesso")
+
+    def test_guided_connection_validates_before_saving_and_imports_plants(self):
+        from solar_crm.db import init_db, query_one
+
+        init_db(seed=True)
+        imported = [RemotePlant("remote-202", "Usina guiada", 18.6, 4.2, 8765.0, "online")]
+        with patch("solar_crm.monitoring.validate_credentials", return_value=imported):
+            integration_id, plants = connect_and_discover(
+                "Conta guiada",
+                GROWATT,
+                "https://openapi.growatt.com",
+                "",
+                "token-valido",
+            )
+
+        self.assertEqual(plants, imported)
+        self.assertEqual(
+            query_one("SELECT status FROM monitoring_integrations WHERE id=?", (integration_id,))["status"],
+            "Conectada",
+        )
+        self.assertEqual(
+            query_one("SELECT name FROM remote_plants WHERE integration_id=?", (integration_id,))["name"],
+            "Usina guiada",
+        )
+
+    def test_guided_connection_does_not_save_invalid_credentials(self):
+        from solar_crm.db import init_db, query_one
+        from solar_crm.monitoring import MonitoringError
+
+        init_db(seed=True)
+        with patch(
+            "solar_crm.monitoring.validate_credentials",
+            side_effect=MonitoringError("credencial recusada"),
+        ):
+            with self.assertRaisesRegex(MonitoringError, "credencial recusada"):
+                connect_and_discover(
+                    "Conta inválida",
+                    GROWATT,
+                    "https://openapi.growatt.com",
+                    "",
+                    "token-ruim",
+                )
+        self.assertEqual(
+            query_one("SELECT COUNT(*) AS value FROM monitoring_integrations")["value"],
+            0,
+        )
+
+    def test_imported_remote_plant_can_create_and_link_local_plant(self):
+        from solar_crm.db import init_db, query_one
+
+        init_db(seed=True)
+        integration_id = create_integration(
+            "Conta Growatt",
+            GROWATT,
+            "https://openapi.growatt.com",
+            "",
+            "token-de-teste",
+        )
+        with patch("solar_crm.monitoring._connector", return_value=_FakeConnector()):
+            discover_remote_plants(integration_id)
+        client = query_one("SELECT id FROM clients ORDER BY id LIMIT 1")
+        plant_id = import_remote_plant(integration_id, "remote-101", client["id"])
+
+        plant = query_one("SELECT name, installed_kwp FROM plants WHERE id=?", (plant_id,))
+        mapping = query_one("SELECT remote_plant_id FROM plant_integrations WHERE plant_id=?", (plant_id,))
+        self.assertEqual(plant["name"], "Usina remota")
+        self.assertEqual(plant["installed_kwp"], 74.8)
+        self.assertEqual(mapping["remote_plant_id"], "remote-101")
 
 
 if __name__ == "__main__":
