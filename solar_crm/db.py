@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -694,6 +694,60 @@ CREATE TABLE IF NOT EXISTS inspection_photos (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS maintenance_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    plant_id INTEGER NOT NULL REFERENCES plants(id) ON DELETE CASCADE,
+    contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL,
+    checklist_template_id INTEGER REFERENCES inspection_checklist_templates(id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    frequency_months INTEGER NOT NULL DEFAULT 6,
+    next_due_date TEXT NOT NULL,
+    lead_days INTEGER NOT NULL DEFAULT 30,
+    priority TEXT NOT NULL DEFAULT 'Média',
+    assignee TEXT,
+    work_description TEXT NOT NULL,
+    safety_instructions TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(plant_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_occurrences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES maintenance_plans(id) ON DELETE CASCADE,
+    scheduled_date TEXT NOT NULL,
+    service_order_id INTEGER REFERENCES service_orders(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(plan_id, scheduled_date)
+);
+
+CREATE TABLE IF NOT EXISTS stock_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sku TEXT UNIQUE,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'Outros',
+    unit TEXT NOT NULL DEFAULT 'un',
+    minimum_quantity REAL NOT NULL DEFAULT 0,
+    location TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS stock_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL REFERENCES stock_items(id) ON DELETE RESTRICT,
+    service_order_id INTEGER REFERENCES service_orders(id) ON DELETE SET NULL,
+    movement_type TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    unit_cost REAL NOT NULL DEFAULT 0,
+    moved_at TEXT NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS service_contracts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     number TEXT UNIQUE,
@@ -863,6 +917,10 @@ CREATE INDEX IF NOT EXISTS idx_site_inspections_token ON site_inspections(public
 CREATE INDEX IF NOT EXISTS idx_inspection_items_inspection ON inspection_checklist_items(inspection_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_inspection_photos_inspection ON inspection_photos(inspection_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_inspection_template_items ON inspection_checklist_template_items(template_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_maintenance_plans_due ON maintenance_plans(active, next_due_date);
+CREATE INDEX IF NOT EXISTS idx_maintenance_occurrences_plan ON maintenance_occurrences(plan_id, scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(item_id, moved_at);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_order ON stock_movements(service_order_id);
 CREATE INDEX IF NOT EXISTS idx_service_contracts_client ON service_contracts(client_id, status);
 CREATE INDEX IF NOT EXISTS idx_sizing_projects_client ON sizing_projects(client_id, status);
 CREATE INDEX IF NOT EXISTS idx_proposals_client ON proposals(client_id, status);
@@ -1716,6 +1774,10 @@ def clear_business_data() -> None:
     """Remove demo/operational records while preserving company settings."""
     conn = connect()
     try:
+        conn.execute("DELETE FROM stock_movements")
+        conn.execute("DELETE FROM stock_items")
+        conn.execute("DELETE FROM maintenance_occurrences")
+        conn.execute("DELETE FROM maintenance_plans")
         conn.execute("DELETE FROM fault_cases")
         conn.execute("DELETE FROM special_sizing_projects")
         conn.execute("DELETE FROM sizing_projects")
@@ -1783,6 +1845,21 @@ def dashboard_metrics(reference_month: str | None = None) -> dict[str, Any]:
                 (month,),
             ).fetchone()
         )
+        plant_energy_rows = [
+            dict(row)
+            for row in conn.execute(
+                """SELECT p.id, p.installed_kwp, p.expected_monthly_kwh, c.state,
+                          r.id AS reading_id, r.generation_kwh, r.reference_amount, r.billed_amount,
+                          COALESCE(NULLIF(r.tariff,0), (
+                              SELECT NULLIF(r2.tariff,0) FROM readings r2
+                              WHERE r2.plant_id=p.id ORDER BY r2.reference_month DESC LIMIT 1
+                          )) AS tariff
+                   FROM plants p JOIN clients c ON c.id=p.client_id
+                   LEFT JOIN readings r ON r.plant_id=p.id AND r.reference_month=?
+                   WHERE p.status!='Desativada'""",
+                (month,),
+            ).fetchall()
+        ]
         tasks = dict(
             conn.execute(
                 """SELECT SUM(CASE WHEN date(due_date)<date('now') AND status NOT IN ('Concluída','Cancelada') THEN 1 ELSE 0 END) AS overdue,
@@ -1822,13 +1899,32 @@ def dashboard_metrics(reference_month: str | None = None) -> dict[str, Any]:
     finally:
         conn.close()
     from solar_crm.calculations import contract_monthly_value
+    from solar_crm.solar_estimates import estimated_monthly_generation, estimated_monthly_savings
+
+    generation_total = 0.0
+    savings_total = 0.0
+    estimated_plants = 0
+    for plant in plant_energy_rows:
+        if plant.get("reading_id"):
+            generation_total += float(plant.get("generation_kwh") or 0)
+            savings_total += max(float(plant.get("reference_amount") or 0) - float(plant.get("billed_amount") or 0), 0)
+        else:
+            estimated_generation = estimated_monthly_generation(
+                plant.get("installed_kwp") or 0,
+                plant.get("state"),
+                plant.get("expected_monthly_kwh") or 0,
+            )
+            generation_total += estimated_generation
+            savings_total += estimated_monthly_savings(estimated_generation, plant.get("tariff"))
+            estimated_plants += 1
     mrr = sum(contract_monthly_value(row, row["plant_count"], row["total_kwp"]) for row in mrr_rows)
     return {
         "active_clients": active,
         "plants": plant_row["plants"],
         "kwp": plant_row["kwp"],
-        "generation": reading["generation"],
-        "savings": reading["savings"],
+        "generation": generation_total,
+        "savings": savings_total,
+        "estimated_plants": estimated_plants,
         "availability": reading["availability"],
         "overdue": tasks["overdue"] or 0,
         "open_tasks": tasks["open_tasks"] or 0,
@@ -1844,7 +1940,9 @@ def available_months() -> list[str]:
            SELECT reference_month FROM beneficiary_readings
            ORDER BY reference_month DESC"""
     )
-    return [row["reference_month"] for row in rows]
+    months = [row["reference_month"] for row in rows]
+    current = date.today().replace(day=1).isoformat()
+    return [current, *[month for month in months if month != current]]
 
 
 def now_iso() -> str:

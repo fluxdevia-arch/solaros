@@ -34,6 +34,9 @@ ENTITIES: dict[str, EntityDefinition] = {
     "inspection_photo": EntityDefinition("inspection_photos", "foto da vistoria"),
     "inspection_template": EntityDefinition("inspection_checklist_templates", "modelo de checklist"),
     "inspection_template_item": EntityDefinition("inspection_checklist_template_items", "item do modelo de checklist"),
+    "maintenance_plan": EntityDefinition("maintenance_plans", "plano preventivo"),
+    "stock_item": EntityDefinition("stock_items", "item de estoque"),
+    "stock_movement": EntityDefinition("stock_movements", "movimentação de estoque"),
     "plant_equipment": EntityDefinition("plant_equipment", "equipamento da usina"),
     "plant_equipment_photo": EntityDefinition("plant_equipment_photos", "foto do equipamento"),
     "inverter_curve_analysis": EntityDefinition("inverter_curve_analyses", "análise de curva do inversor"),
@@ -143,6 +146,7 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM integration_sync_logs WHERE integration_id=?", (rid,)), "histórico de sincronização", "históricos de sincronização")
     elif entity == "contract":
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM invoices WHERE contract_id=? AND deleted_at IS NULL", (rid,)), "cobrança e seu lançamento no caixa", "cobranças e seus lançamentos no caixa")
+        _append_count(lines, _count("SELECT COUNT(*) AS value FROM maintenance_plans WHERE contract_id=?", (rid,)), "plano preventivo que será preservado sem o contrato", "planos preventivos que serão preservados sem o contrato")
     elif entity == "invoice":
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM cash_transactions WHERE source_type='invoice' AND source_id=?", (rid,)), "lançamento correspondente no caixa", "lançamentos correspondentes no caixa")
     elif entity == "service_contract":
@@ -150,6 +154,7 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
     elif entity == "service_order":
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM site_inspections WHERE service_order_id=?", (rid,)), "vistoria que será preservada sem vínculo com a O.S.", "vistorias que serão preservadas sem vínculo com a O.S.")
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM fault_cases WHERE service_order_id=?", (rid,)), "caso técnico que será preservado sem vínculo com a O.S.", "casos técnicos que serão preservados sem vínculo com a O.S.")
+        _append_count(lines, _count("SELECT COUNT(*) AS value FROM stock_movements WHERE service_order_id=?", (rid,)), "movimentação de estoque que será preservada sem vínculo com a O.S.", "movimentações de estoque que serão preservadas sem vínculo com a O.S.")
     elif entity == "fault_catalog":
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM fault_cases WHERE fault_id=?", (rid,)), "caso técnico que bloqueia a exclusão", "casos técnicos que bloqueiam a exclusão")
     elif entity == "fault_case":
@@ -160,6 +165,10 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
     elif entity == "inspection_template":
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM inspection_checklist_template_items WHERE template_id=?", (rid,)), "item do modelo", "itens do modelo")
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM site_inspections WHERE template_id=?", (rid,)), "vistoria que será preservada sem o vínculo com o modelo", "vistorias que serão preservadas sem o vínculo com o modelo")
+    elif entity == "maintenance_plan":
+        _append_count(lines, _count("SELECT COUNT(*) AS value FROM maintenance_occurrences WHERE plan_id=?", (rid,)), "agendamento gerado", "agendamentos gerados")
+    elif entity == "stock_item":
+        _append_count(lines, _count("SELECT COUNT(*) AS value FROM stock_movements WHERE item_id=?", (rid,)), "movimentação que bloqueia a exclusão", "movimentações que bloqueiam a exclusão")
     elif entity == "plant_equipment":
         _append_count(
             lines,
@@ -223,6 +232,14 @@ def delete_record(entity: str, record_id: int) -> None:
             is_system = int(row["is_system"] if isinstance(row, dict) else row[0])
             if is_system:
                 raise DeletionBlocked("Os itens dos modelos do sistema não podem ser excluídos.")
+
+        if entity == "stock_item":
+            used = conn.execute("SELECT COUNT(*) AS value FROM stock_movements WHERE item_id=?", (rid,)).fetchone()
+            count = int(used["value"] if isinstance(used, dict) else used[0])
+            if count:
+                raise DeletionBlocked(
+                    f"Este item possui {count} movimentação(ões). Desative-o ou exclua primeiro as movimentações vinculadas."
+                )
 
         if entity == "client":
             conn.execute(

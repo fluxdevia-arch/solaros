@@ -46,8 +46,9 @@ with st.container(horizontal=True):
     st.metric("A receber no mês", money(metrics["receivable"]), border=True)
 
 with st.container(horizontal=True):
-    st.metric("Geração no mês", f"{number_br(metrics['generation'] / 1000, 1)} MWh", border=True)
-    st.metric("Economia do cliente", money(metrics["savings"]), border=True)
+    estimate_suffix = " estimada" if int(metrics.get("estimated_plants", 0)) else ""
+    st.metric(f"Geração{estimate_suffix} no mês", f"{number_br(metrics['generation'] / 1000, 1)} MWh", border=True)
+    st.metric(f"Economia{estimate_suffix} do cliente", money(metrics["savings"]), border=True)
     st.metric("Disponibilidade média", percent(metrics["availability"]), border=True)
     st.metric(
         "Tarefas atrasadas",
@@ -55,6 +56,12 @@ with st.container(horizontal=True):
         delta=f"{int(metrics['open_tasks'])} em aberto",
         delta_color="inverse" if metrics["overdue"] else "off",
         border=True,
+    )
+
+if int(metrics.get("estimated_plants", 0)):
+    st.caption(
+        f"Estimativa aplicada a {int(metrics['estimated_plants'])} usina(s) sem leitura no mês: potência instalada × produtividade solar média do estado. "
+        "A economia usa a última tarifa registrada ou R$ 0,95/kWh como referência. Ao lançar a leitura real, ela substitui automaticamente a estimativa."
     )
 
 om_summary = dashboard_frame(
@@ -94,8 +101,11 @@ performance = dashboard_frame(
     """SELECT p.name AS plant, c.name AS client,
               COALESCE(r.generation_kwh,0) AS generation,
               p.expected_monthly_kwh AS expected,
-              CASE WHEN p.expected_monthly_kwh>0 THEN COALESCE(r.generation_kwh,0)/p.expected_monthly_kwh*100 ELSE 0 END AS performance,
+              CASE WHEN r.id IS NULL THEN NULL
+                   WHEN p.expected_monthly_kwh>0 THEN COALESCE(r.generation_kwh,0)/p.expected_monthly_kwh*100
+                   ELSE NULL END AS performance,
               COALESCE(r.availability_pct,0) AS availability,
+              CASE WHEN r.id IS NULL THEN 0 ELSE 1 END AS has_reading,
               p.status
        FROM plants p JOIN clients c ON c.id=p.client_id
        LEFT JOIN readings r ON r.plant_id=p.id AND r.reference_month=?
@@ -124,32 +134,39 @@ with right:
     with st.container(border=True):
         st.subheader("Saúde das usinas", icon=":material/health_metrics:")
         if not performance.empty:
-            normal = int((performance["performance"] >= 90).sum())
-            attention = int(((performance["performance"] < 90) & (performance["performance"] >= 75)).sum())
-            critical = int((performance["performance"] < 75).sum())
+            measured = performance[performance["has_reading"] == 1].copy()
+            no_reading = int((performance["has_reading"] == 0).sum())
+            normal = int((measured["performance"] >= 90).sum())
+            attention = int(((measured["performance"] < 90) & (measured["performance"] >= 75)).sum())
+            critical = int((measured["performance"] < 75).sum())
             st.markdown(f":green-badge[{normal} normais] :orange-badge[{attention} atenção] :red-badge[{critical} críticas]")
-            health = performance[["plant", "performance"]].copy()
-            health["health"] = pd.cut(
-                health["performance"],
-                bins=[-float("inf"), 75, 90, float("inf")],
-                labels=["Crítica", "Atenção", "Normal"],
-                right=False,
-            )
-            chart = alt.Chart(health).mark_bar(cornerRadiusEnd=4).encode(
-                x=alt.X("performance:Q", title="Desempenho (%)", scale=alt.Scale(domain=[0, max(110, float(health['performance'].max()) + 5)])),
-                y=alt.Y("plant:N", title=None, sort="x"),
-                color=alt.Color(
-                    "health:N",
-                    title=None,
-                    scale=alt.Scale(
-                        domain=["Normal", "Atenção", "Crítica"],
-                        range=["#0B7A53", "#E3A72F", "#C43D3D"],
+            if no_reading:
+                st.caption(f"{no_reading} usina(s) aguardando leitura real para classificação de desempenho.")
+            health = measured[["plant", "performance"]].dropna().copy()
+            if health.empty:
+                st.info("A geração estimada preenche os indicadores financeiros, mas a saúde da usina só é classificada após uma leitura real.")
+            else:
+                health["health"] = pd.cut(
+                    health["performance"],
+                    bins=[-float("inf"), 75, 90, float("inf")],
+                    labels=["Crítica", "Atenção", "Normal"],
+                    right=False,
+                )
+                chart = alt.Chart(health).mark_bar(cornerRadiusEnd=4).encode(
+                    x=alt.X("performance:Q", title="Desempenho (%)", scale=alt.Scale(domain=[0, max(110, float(health['performance'].max()) + 5)])),
+                    y=alt.Y("plant:N", title=None, sort="x"),
+                    color=alt.Color(
+                        "health:N",
+                        title=None,
+                        scale=alt.Scale(
+                            domain=["Normal", "Atenção", "Crítica"],
+                            range=["#0B7A53", "#E3A72F", "#C43D3D"],
+                        ),
+                        legend=None,
                     ),
-                    legend=None,
-                ),
-                tooltip=[alt.Tooltip("plant:N", title="Usina"), alt.Tooltip("performance:Q", title="Desempenho", format=".1f")],
-            )
-            st.altair_chart(chart)
+                    tooltip=[alt.Tooltip("plant:N", title="Usina"), alt.Tooltip("performance:Q", title="Desempenho", format=".1f")],
+                )
+                st.altair_chart(chart)
         else:
             st.caption("Sem dados de desempenho para o mês.")
 

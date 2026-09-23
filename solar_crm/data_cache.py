@@ -45,6 +45,7 @@ def complete_dashboard_metrics(metrics: dict[str, Any] | None) -> dict[str, Any]
         "open_tasks": 0,
         "mrr": 0,
         "receivable": 0,
+        "estimated_plants": 0,
     }
     if metrics:
         defaults.update(metrics)

@@ -6,6 +6,7 @@ import streamlit as st
 
 from solar_crm.db import query, query_df, query_one
 from solar_crm.document_cache import service_order_pdf
+from solar_crm.maintenance import record_stock_movement, service_order_stock_movements, stock_items
 from solar_crm.sharing import resolve_share_base_url
 from solar_crm.ui import date_br, flash, page_intro, render_delete_control, show_flash
 from solar_crm.workflow import (
@@ -16,6 +17,32 @@ from solar_crm.workflow import (
     service_order_share_url,
     update_service_order,
 )
+
+
+def _render_order_stock(order_id: int) -> None:
+    used = service_order_stock_movements(order_id)
+    if used:
+        used_frame = pd.DataFrame(used)[["moved_at", "item_name", "quantity", "unit", "notes"]]
+        used_frame.columns = ["Data", "Material", "Quantidade", "Unidade", "Observação"]
+        used_frame["Data"] = used_frame["Data"].map(date_br)
+        st.dataframe(used_frame, hide_index=True, width="stretch")
+    available = [row for row in stock_items() if float(row["balance"]) > 0]
+    if not available:
+        st.caption("Nenhum material com saldo disponível no estoque.")
+        return
+    item_map = {f"{row['name']} · {float(row['balance']):g} {row['unit']}": row for row in available}
+    with st.form(f"order_stock_{order_id}", clear_on_submit=True):
+        item_label = st.selectbox("Material utilizado", list(item_map))
+        quantity = st.number_input("Quantidade utilizada", min_value=0.01, value=1.0, step=1.0)
+        notes = st.text_input("Observação", placeholder="Ex.: substituído o DPS da entrada 2")
+        if st.form_submit_button("Dar baixa no estoque", icon=":material/remove_shopping_cart:", width="stretch"):
+            try:
+                item = item_map[item_label]
+                record_stock_movement(item["id"], "Saída", quantity, service_order_id=order_id, notes=notes)
+                st.success("Material vinculado à O.S. e baixado do estoque.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
 
 
 token = str(st.query_params.get("os") or "").strip()
@@ -61,6 +88,8 @@ if token:
             update_service_order(order["id"], field_status, completion_notes, field_assignee)
             st.success("Ordem de serviço atualizada.", icon=":material/check_circle:")
             st.rerun()
+    with st.expander("Materiais utilizados", icon=":material/inventory_2:"):
+        _render_order_stock(order["id"])
     st.download_button(
         "Baixar ordem de serviço em PDF",
         service_order_pdf(order["id"], str(order.get("updated_at") or "")),
@@ -183,6 +212,8 @@ if orders:
                 update_service_order(selected_order["id"], new_status, notes, new_assignee)
                 flash("Ordem de serviço atualizada.")
                 st.rerun()
+    with st.expander("Materiais utilizados e baixa no estoque", icon=":material/inventory_2:"):
+        _render_order_stock(selected_order["id"])
     render_delete_control(
         "service_order",
         selected_order["id"],

@@ -6,7 +6,7 @@ from solar_crm import db as db_module
 
 # Streamlit can hot-reload the entrypoint while keeping imported modules alive.
 # Reload an older database module before running a newly deployed migration.
-if int(getattr(db_module, "SCHEMA_VERSION", 0)) < 18:
+if int(getattr(db_module, "SCHEMA_VERSION", 0)) < 19:
     db_module = importlib.reload(db_module)
 
 from solar_crm.auth import render_user_sidebar, require_login
@@ -86,6 +86,7 @@ pages = {
         st.Page("app_pages/operations.py", title="Operação e agenda", icon=":material/build:"),
         st.Page("app_pages/service_orders.py", title="Ordens de serviço", icon=":material/assignment:"),
         st.Page("app_pages/inspections.py", title="Vistorias", icon=":material/fact_check:"),
+        st.Page("app_pages/maintenance_inventory.py", title="Preventivas e estoque", icon=":material/inventory_2:"),
         st.Page("app_pages/reports.py", title="Relatórios", icon=":material/description:"),
     ],
     "Engenharia": [

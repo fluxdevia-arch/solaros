@@ -21,6 +21,9 @@ Sistema profissional para estruturar o pós-venda e o pré-dimensionamento de pr
 - Vistorias técnicas mobile-first, vinculadas a cliente, usina e ordem de serviço, com link individual para a equipe de campo.
 - Checklist elétrico e fotovoltaico por blocos, com modelo básico e manutenção preventiva completa de 71 itens, posição solar, medições CC/CA, peças substituídas e até 20 fotos por vistoria.
 - Modelos de checklist reutilizáveis, evidências vinculadas a cada item e abertura de O.S. corretiva diretamente de uma não conformidade.
+- Agenda preventiva automática por usina, contrato e periodicidade, com geração antecipada de ordens de serviço.
+- Estoque de peças e consumíveis com saldo mínimo, entradas, saídas e baixa vinculada à O.S. executada.
+- Dashboard com estimativa regional de geração e economia quando a leitura real do mês ainda não foi lançada.
 - Relatório fotográfico de vistoria em PDF com identidade visual configurável, resultados destacados e assinatura técnica padronizada.
 - Gerador de contratos para pós-venda, manutenção, consultoria e projetos, com histórico e PDF.
 - Cálculo de cobertura, desempenho, disponibilidade e economia estimada.
