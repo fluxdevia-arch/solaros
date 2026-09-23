@@ -6,7 +6,7 @@ from solar_crm import db as db_module
 
 # Streamlit can hot-reload the entrypoint while keeping imported modules alive.
 # Reload an older database module before running a newly deployed migration.
-if int(getattr(db_module, "SCHEMA_VERSION", 0)) < 17:
+if int(getattr(db_module, "SCHEMA_VERSION", 0)) < 18:
     db_module = importlib.reload(db_module)
 
 from solar_crm.auth import render_user_sidebar, require_login

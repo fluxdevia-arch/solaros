@@ -430,7 +430,8 @@ class StreamlitSmokeTest(unittest.TestCase):
 
         self.assertFalse(app.exception)
         self.assertTrue(any(title.value == "Vistoria técnica" for title in app.title))
-        self.assertGreaterEqual(len(app.selectbox), 25)
+        self.assertGreaterEqual(len(app.selectbox), 10)
+        self.assertTrue(any(widget.label == "Bloco do checklist" for widget in app.selectbox))
 
     def test_hybrid_sizing_form_calculates_complete_system(self):
         app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"

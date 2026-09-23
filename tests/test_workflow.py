@@ -10,11 +10,13 @@ from solar_crm.db import init_db, query_one
 from solar_crm.inspection_documents import generate_inspection_pdf
 from solar_crm.inspections import (
     add_inspection_photo,
+    create_corrective_order_from_item,
     create_inspection,
     inspection_by_token,
     inspection_details,
     inspection_items,
     inspection_share_url,
+    list_inspection_templates,
     update_inspection,
 )
 from solar_crm.service_documents import generate_service_contract_pdf, generate_service_order_pdf
@@ -158,6 +160,42 @@ class WorkflowTests(unittest.TestCase):
         pdf = generate_inspection_pdf(inspection_id)
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 7000)
+
+    def test_preventive_template_has_71_items_and_opens_corrective_order(self):
+        templates = list_inspection_templates()
+        preventive = next(row for row in templates if row["name"] == "Manutenção preventiva completa")
+        self.assertEqual(int(preventive["item_count"]), 71)
+
+        client = query_one("SELECT id FROM clients ORDER BY id LIMIT 1")
+        plant = query_one("SELECT id, address FROM plants WHERE client_id=? ORDER BY id LIMIT 1", (client["id"],))
+        inspection_id = create_inspection({
+            "client_id": client["id"],
+            "plant_id": plant["id"],
+            "template_id": preventive["id"],
+            "inspection_type": "Manutenção preventiva",
+            "inspected_at": "2026-09-23",
+            "address": plant["address"],
+        })
+        items = inspection_items(inspection_id)
+        self.assertEqual(len(items), 71)
+        self.assertEqual(len({row["category"] for row in items}), 14)
+
+        failed = items[0]
+        failed.update({
+            "status": "Não conforme",
+            "notes": "DPS com indicação de fim de vida.",
+            "replacement_part": "DPS classe II",
+            "replacement_serial": "SN-2026-001",
+        })
+        inspection = inspection_details(inspection_id)
+        update_inspection(inspection_id, {**inspection, "status": "Em andamento", "urgency": "Prioritária"}, [failed])
+        order_id = create_corrective_order_from_item(failed["id"])
+        linked = query_one("SELECT * FROM inspection_checklist_items WHERE id=?", (failed["id"],))
+        order = query_one("SELECT * FROM service_orders WHERE id=?", (order_id,))
+        self.assertEqual(linked["corrective_order_id"], order_id)
+        self.assertEqual(linked["replacement_part"], "DPS classe II")
+        self.assertTrue(order["number"].startswith("OS-"))
+        self.assertIn("DPS", order["materials"])
 
 
 if __name__ == "__main__":

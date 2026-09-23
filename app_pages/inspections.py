@@ -14,14 +14,18 @@ from solar_crm.inspections import (
     INSPECTION_URGENCIES,
     ITEM_STATUSES,
     add_inspection_photo,
+    add_inspection_template_item,
     completion_score,
+    create_corrective_order_from_item,
     create_inspection,
+    create_inspection_template,
     ensure_inspection_schema,
     inspection_by_token,
     inspection_details,
     inspection_items,
     inspection_photos,
     inspection_share_url,
+    list_inspection_templates,
     update_inspection,
 )
 from solar_crm.sharing import resolve_share_base_url
@@ -108,6 +112,16 @@ def _render_photo_capture(inspection_id: int) -> None:
             on_change=_advance_photo_capture,
             args=(inspection_id,),
         )
+        checklist = inspection_items(inspection_id)
+        item_map = {"Evidência geral (sem item vinculado)": None, **{
+            f"{row['category']} · {row['item']}": row["id"] for row in checklist
+        }}
+        linked_item_label = st.selectbox(
+            "Vincular a um item do checklist",
+            list(item_map),
+            key=f"inspection_photo_item_{inspection_id}_{cycle}",
+        )
+        linked_item_id = item_map[linked_item_label]
         category_index = PHOTO_CATEGORIES.index(photo_category)
         camera_photo = st.camera_input(
             "Tirar foto no local",
@@ -135,6 +149,7 @@ def _render_photo_capture(inspection_id: int) -> None:
                     camera_photo.name,
                     photo_category,
                     camera_caption,
+                    linked_item_id,
                 )
                 st.session_state[notice_key] = f"Foto de {photo_category} salva. A câmera está pronta para a próxima foto."
                 _advance_photo_capture(inspection_id)
@@ -168,6 +183,7 @@ def _render_photo_capture(inspection_id: int) -> None:
                         uploaded.name,
                         photo_category,
                         uploaded.name,
+                        linked_item_id,
                     )
                 st.session_state[notice_key] = f"{len(uploaded_photos)} foto(s) da galeria salva(s) em {photo_category}."
                 st.session_state[gallery_cycle_key] = gallery_cycle + 1
@@ -183,6 +199,13 @@ def _render_field_form(inspection: dict) -> None:
     grouped: dict[str, list[dict]] = defaultdict(list)
     for item in items:
         grouped[item["category"]].append(item)
+    categories = list(grouped)
+    selected_category = st.selectbox(
+        "Bloco do checklist",
+        categories,
+        key=f"inspection_category_{inspection['id']}",
+        help="No celular, preencha e salve um bloco por vez. Os demais dados já registrados são preservados.",
+    ) if categories else None
 
     with st.form(f"inspection_field_{inspection['id']}"):
         with st.expander("1. Atendimento e condições do local", expanded=True, icon=":material/location_on:"):
@@ -214,9 +237,11 @@ def _render_field_form(inspection: dict) -> None:
             longitude = st.number_input("Longitude", min_value=-180.0, max_value=180.0, value=_float_value(inspection.get("longitude")), step=0.000001, format="%.6f")
 
         with st.expander("3. Checklist técnico", icon=":material/fact_check:"):
-            st.caption("Marque cada ponto verificado. Itens pendentes ficam destacados no relatório.")
+            st.caption(f"Bloco {categories.index(selected_category) + 1} de {len(categories)}. Salve o bloco antes de avançar.")
             checklist_values = []
             for category, category_items in grouped.items():
+                if category != selected_category:
+                    continue
                 st.markdown(f"**{category}**")
                 for item in category_items:
                     key_root = f"inspection_{inspection['id']}_item_{item['id']}"
@@ -233,7 +258,25 @@ def _render_field_form(inspection: dict) -> None:
                         label_visibility="collapsed",
                         placeholder="Observação opcional",
                     )
-                    checklist_values.append({**item, "status": item_status, "notes": item_notes})
+                    if item.get("requires_photo"):
+                        st.caption("Evidência fotográfica recomendada para este item.")
+                    replacement_part = st.text_input(
+                        f"Peça substituída · {item['item']}",
+                        value=item.get("replacement_part") or "",
+                        key=f"{key_root}_part",
+                        placeholder="Opcional: fabricante e modelo da peça",
+                    )
+                    replacement_serial = st.text_input(
+                        f"Número de série · {item['item']}",
+                        value=item.get("replacement_serial") or "",
+                        key=f"{key_root}_serial",
+                        placeholder="Opcional",
+                    )
+                    checklist_values.append({
+                        **item, "status": item_status, "notes": item_notes,
+                        "replacement_part": replacement_part,
+                        "replacement_serial": replacement_serial,
+                    })
                 st.divider()
 
         with st.expander("4. Medições elétricas e desempenho", icon=":material/electric_meter:"):
@@ -308,6 +351,28 @@ def _render_field_form(inspection: dict) -> None:
                 st.error(str(exc), icon=":material/error:")
 
     _render_photo_capture(inspection["id"])
+    nonconformities = [row for row in inspection_items(inspection["id"]) if row["status"] == "Não conforme"]
+    if nonconformities:
+        with st.expander("7. Não conformidades e O.S. corretivas", expanded=True, icon=":material/build_circle:"):
+            st.caption("Transforme cada pendência em uma ordem de serviço rastreável.")
+            for item in nonconformities:
+                with st.container(border=True):
+                    st.markdown(f"**{item['item']}**")
+                    st.caption(item.get("notes") or "Sem observação registrada.")
+                    if item.get("corrective_order_number"):
+                        st.success(f"O.S. {item['corrective_order_number']} vinculada", icon=":material/check_circle:")
+                    elif st.button(
+                        "Criar O.S. corretiva",
+                        key=f"corrective_order_{item['id']}",
+                        icon=":material/add_task:",
+                        width="stretch",
+                    ):
+                        try:
+                            create_corrective_order_from_item(item["id"])
+                            st.success("O.S. corretiva criada e vinculada.")
+                            st.rerun()
+                        except ValueError as exc:
+                            st.error(str(exc))
 
 
 token = str(st.query_params.get("inspection") or "").strip()
@@ -355,6 +420,7 @@ inspections = query(
        LEFT JOIN plants p ON p.id=si.plant_id
        ORDER BY CASE si.status WHEN 'Concluída' THEN 2 ELSE 1 END, si.inspected_at DESC, si.id DESC"""
 )
+templates = list_inspection_templates()
 
 open_inspections = [row for row in inspections if row["status"] != "Concluída"]
 with st.container(horizontal=True):
@@ -378,9 +444,16 @@ if clients:
         order_map = {"Sem ordem de serviço vinculada": None, **{f"{row['number']} · {row['title']}": row for row in client_orders}}
         selected_order_name = st.selectbox("Ordem de serviço", list(order_map), key="inspection_order")
         selected_order = order_map[selected_order_name]
+        template_map = {f"{row['name']} · {row['item_count']} itens": row for row in templates}
+        selected_template_label = st.selectbox("Modelo de checklist", list(template_map), key="inspection_template")
+        selected_template = template_map[selected_template_label]
         default_address = (plant.get("address") if plant else None) or (selected_order.get("address") if selected_order else None) or ", ".join(filter(None, [client.get("address"), client.get("city"), client.get("state")]))
         with st.form("new_inspection", clear_on_submit=True):
-            inspection_type = st.selectbox("Tipo", INSPECTION_TYPES)
+            inspection_type = st.selectbox(
+                "Tipo",
+                INSPECTION_TYPES,
+                index=_select_index(INSPECTION_TYPES, selected_template.get("inspection_type")),
+            )
             inspection_date = st.date_input("Data programada", value=date.today())
             technician = st.text_input("Técnico responsável")
             address = st.text_area("Endereço", value=default_address, height=80)
@@ -393,6 +466,7 @@ if clients:
                         "client_id": client["id"],
                         "plant_id": plant["id"] if plant else None,
                         "service_order_id": selected_order["id"] if selected_order else None,
+                        "template_id": selected_template["id"],
                         "inspection_type": inspection_type,
                         "status": "Rascunho",
                         "urgency": urgency,
@@ -409,6 +483,53 @@ if clients:
                     st.error(str(exc))
 else:
     st.warning("Cadastre um cliente antes de programar uma vistoria.", icon=":material/warning:")
+
+with st.expander("Modelos de checklist", icon=":material/checklist:"):
+    st.caption("Os modelos do sistema são protegidos. Crie uma cópia para adaptar o checklist à sua operação.")
+    template_frame = pd.DataFrame(templates)
+    if not template_frame.empty:
+        template_frame = template_frame[["name", "inspection_type", "item_count", "standard_reference"]]
+        template_frame.columns = ["Modelo", "Tipo", "Itens", "Referência"]
+        st.dataframe(template_frame, hide_index=True, width="stretch")
+    clone_map = {"Começar vazio": None, **{row["name"]: row["id"] for row in templates}}
+    with st.form("create_inspection_template", clear_on_submit=True):
+        template_name = st.text_input("Nome do novo modelo")
+        template_description = st.text_area("Descrição", height=70)
+        template_type = st.selectbox("Tipo padrão", INSPECTION_TYPES)
+        clone_label = st.selectbox("Copiar itens de", list(clone_map))
+        if st.form_submit_button("Criar modelo", icon=":material/content_copy:"):
+            try:
+                create_inspection_template({
+                    "name": template_name,
+                    "description": template_description,
+                    "inspection_type": template_type,
+                    "clone_from_id": clone_map[clone_label],
+                })
+                st.success("Modelo criado.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+    custom_templates = [row for row in templates if not row["is_system"]]
+    if custom_templates:
+        custom_map = {row["name"]: row for row in custom_templates}
+        selected_custom = custom_map[st.selectbox("Personalizar modelo", list(custom_map))]
+        render_delete_control(
+            "inspection_template",
+            selected_custom["id"],
+            f"modelo {selected_custom['name']}",
+            extra_warning="As vistorias já criadas manterão seus itens; somente o vínculo com este modelo será removido.",
+        )
+        with st.form("add_template_item", clear_on_submit=True):
+            item_category = st.text_input("Bloco / categoria")
+            item_name = st.text_input("Novo item de verificação")
+            item_requires_photo = st.checkbox("Recomendar evidência fotográfica")
+            if st.form_submit_button("Adicionar item", icon=":material/add:"):
+                try:
+                    add_inspection_template_item(selected_custom["id"], item_category, item_name, item_requires_photo)
+                    st.success("Item adicionado ao modelo.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
 
 if inspections:
     st.subheader("Histórico de vistorias", icon=":material/history:")

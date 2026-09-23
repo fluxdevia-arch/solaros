@@ -32,6 +32,8 @@ ENTITIES: dict[str, EntityDefinition] = {
     "fault_case": EntityDefinition("fault_cases", "caso técnico"),
     "inspection": EntityDefinition("site_inspections", "vistoria"),
     "inspection_photo": EntityDefinition("inspection_photos", "foto da vistoria"),
+    "inspection_template": EntityDefinition("inspection_checklist_templates", "modelo de checklist"),
+    "inspection_template_item": EntityDefinition("inspection_checklist_template_items", "item do modelo de checklist"),
     "plant_equipment": EntityDefinition("plant_equipment", "equipamento da usina"),
     "plant_equipment_photo": EntityDefinition("plant_equipment_photos", "foto do equipamento"),
     "inverter_curve_analysis": EntityDefinition("inverter_curve_analyses", "análise de curva do inversor"),
@@ -155,6 +157,9 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
     elif entity == "inspection":
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM inspection_checklist_items WHERE inspection_id=?", (rid,)), "item de checklist", "itens de checklist")
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM inspection_photos WHERE inspection_id=?", (rid,)), "foto", "fotos")
+    elif entity == "inspection_template":
+        _append_count(lines, _count("SELECT COUNT(*) AS value FROM inspection_checklist_template_items WHERE template_id=?", (rid,)), "item do modelo", "itens do modelo")
+        _append_count(lines, _count("SELECT COUNT(*) AS value FROM site_inspections WHERE template_id=?", (rid,)), "vistoria que será preservada sem o vínculo com o modelo", "vistorias que serão preservadas sem o vínculo com o modelo")
     elif entity == "plant_equipment":
         _append_count(
             lines,
@@ -203,6 +208,21 @@ def delete_record(entity: str, record_id: int) -> None:
                 raise DeletionBlocked(
                     f"Esta orientação está vinculada a {count} caso(s) técnico(s). Exclua primeiro os casos vinculados."
                 )
+
+        if entity == "inspection_template":
+            row = conn.execute("SELECT is_system FROM inspection_checklist_templates WHERE id=?", (rid,)).fetchone()
+            is_system = int(row["is_system"] if isinstance(row, dict) else row[0])
+            if is_system:
+                raise DeletionBlocked("Os modelos de checklist do sistema não podem ser excluídos.")
+        if entity == "inspection_template_item":
+            row = conn.execute(
+                """SELECT t.is_system FROM inspection_checklist_template_items i
+                   JOIN inspection_checklist_templates t ON t.id=i.template_id WHERE i.id=?""",
+                (rid,),
+            ).fetchone()
+            is_system = int(row["is_system"] if isinstance(row, dict) else row[0])
+            if is_system:
+                raise DeletionBlocked("Os itens dos modelos do sistema não podem ser excluídos.")
 
         if entity == "client":
             conn.execute(

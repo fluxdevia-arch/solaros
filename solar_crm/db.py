@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -598,6 +598,28 @@ CREATE TABLE IF NOT EXISTS fault_rechecks (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS inspection_checklist_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    inspection_type TEXT NOT NULL DEFAULT 'Vistoria técnica',
+    standard_reference TEXT,
+    is_system INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS inspection_checklist_template_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id INTEGER NOT NULL REFERENCES inspection_checklist_templates(id) ON DELETE CASCADE,
+    category TEXT NOT NULL,
+    item TEXT NOT NULL,
+    requires_photo INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(template_id, item)
+);
+
 CREATE TABLE IF NOT EXISTS site_inspections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     number TEXT UNIQUE,
@@ -605,6 +627,7 @@ CREATE TABLE IF NOT EXISTS site_inspections (
     client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
     plant_id INTEGER REFERENCES plants(id) ON DELETE SET NULL,
     service_order_id INTEGER REFERENCES service_orders(id) ON DELETE SET NULL,
+    template_id INTEGER REFERENCES inspection_checklist_templates(id) ON DELETE SET NULL,
     inspection_type TEXT NOT NULL DEFAULT 'Vistoria técnica',
     status TEXT NOT NULL DEFAULT 'Rascunho',
     urgency TEXT NOT NULL DEFAULT 'Rotina',
@@ -651,6 +674,10 @@ CREATE TABLE IF NOT EXISTS inspection_checklist_items (
     item TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'Não verificado',
     notes TEXT,
+    requires_photo INTEGER NOT NULL DEFAULT 0,
+    replacement_part TEXT,
+    replacement_serial TEXT,
+    corrective_order_id INTEGER REFERENCES service_orders(id) ON DELETE SET NULL,
     sort_order INTEGER NOT NULL DEFAULT 0,
     UNIQUE(inspection_id, item)
 );
@@ -658,6 +685,7 @@ CREATE TABLE IF NOT EXISTS inspection_checklist_items (
 CREATE TABLE IF NOT EXISTS inspection_photos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     inspection_id INTEGER NOT NULL REFERENCES site_inspections(id) ON DELETE CASCADE,
+    checklist_item_id INTEGER REFERENCES inspection_checklist_items(id) ON DELETE SET NULL,
     category TEXT NOT NULL,
     caption TEXT,
     filename TEXT,
@@ -834,6 +862,7 @@ CREATE INDEX IF NOT EXISTS idx_special_sizing_client ON special_sizing_projects(
 CREATE INDEX IF NOT EXISTS idx_site_inspections_token ON site_inspections(public_token);
 CREATE INDEX IF NOT EXISTS idx_inspection_items_inspection ON inspection_checklist_items(inspection_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_inspection_photos_inspection ON inspection_photos(inspection_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_inspection_template_items ON inspection_checklist_template_items(template_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_service_contracts_client ON service_contracts(client_id, status);
 CREATE INDEX IF NOT EXISTS idx_sizing_projects_client ON sizing_projects(client_id, status);
 CREATE INDEX IF NOT EXISTS idx_proposals_client ON proposals(client_id, status);
@@ -851,6 +880,7 @@ def init_db(seed: bool = True) -> None:
             conn.execute("SELECT pg_advisory_xact_lock(1397705807)")
         conn.executescript(SCHEMA)
         _ensure_schema_columns(conn)
+        _seed_inspection_templates(conn)
         _seed_fault_catalog(conn)
         count_row = conn.execute("SELECT COUNT(*) AS value FROM settings").fetchone()
         count = count_row["value"] if isinstance(count_row, dict) else count_row[0]
@@ -958,6 +988,15 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
         for name, column_type in cash_additions.items():
             conn.execute(f"ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS {name} {column_type}")
         conn.execute("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS deleted_at TEXT")
+        conn.execute("ALTER TABLE site_inspections ADD COLUMN IF NOT EXISTS template_id BIGINT REFERENCES inspection_checklist_templates(id) ON DELETE SET NULL")
+        for name, column_type in {
+            "requires_photo": "INTEGER NOT NULL DEFAULT 0",
+            "replacement_part": "TEXT",
+            "replacement_serial": "TEXT",
+            "corrective_order_id": "BIGINT REFERENCES service_orders(id) ON DELETE SET NULL",
+        }.items():
+            conn.execute(f"ALTER TABLE inspection_checklist_items ADD COLUMN IF NOT EXISTS {name} {column_type}")
+        conn.execute("ALTER TABLE inspection_photos ADD COLUMN IF NOT EXISTS checklist_item_id BIGINT REFERENCES inspection_checklist_items(id) ON DELETE SET NULL")
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_source ON cash_transactions(source_type, source_id)"
         )
@@ -990,9 +1029,69 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
     invoice_columns = {row[1] for row in conn.execute("PRAGMA table_info(invoices)").fetchall()}
     if "deleted_at" not in invoice_columns:
         conn.execute("ALTER TABLE invoices ADD COLUMN deleted_at TEXT")
+    table_additions = {
+        "site_inspections": {"template_id": "INTEGER REFERENCES inspection_checklist_templates(id) ON DELETE SET NULL"},
+        "inspection_checklist_items": {
+            "requires_photo": "INTEGER NOT NULL DEFAULT 0",
+            "replacement_part": "TEXT",
+            "replacement_serial": "TEXT",
+            "corrective_order_id": "INTEGER REFERENCES service_orders(id) ON DELETE SET NULL",
+        },
+        "inspection_photos": {"checklist_item_id": "INTEGER REFERENCES inspection_checklist_items(id) ON DELETE SET NULL"},
+    }
+    for table, additions_for_table in table_additions.items():
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, column_type in additions_for_table.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_source ON cash_transactions(source_type, source_id)"
     )
+
+
+def _seed_inspection_templates(conn: sqlite3.Connection | PostgresConnection) -> None:
+    from solar_crm.checklists import BASIC_INSPECTION_CHECKLIST, PREVENTIVE_71_CHECKLIST
+
+    templates = [
+        (
+            "Vistoria técnica básica",
+            "Checklist enxuto para vistoria, comissionamento e diagnóstico inicial.",
+            "Vistoria técnica",
+            "Boas práticas de inspeção fotovoltaica",
+            BASIC_INSPECTION_CHECKLIST,
+        ),
+        (
+            "Manutenção preventiva completa",
+            "Checklist preventivo com 71 verificações organizadas em 14 blocos.",
+            "Manutenção preventiva",
+            "Referência técnica: NR-10, NR-35, ABNT NBR 5410, 5419, 16690 e manuais dos fabricantes",
+            PREVENTIVE_71_CHECKLIST,
+        ),
+    ]
+    for name, description, inspection_type, standard_reference, items in templates:
+        existing = conn.execute(
+            "SELECT id FROM inspection_checklist_templates WHERE name=?", (name,)
+        ).fetchone()
+        if existing:
+            template_id = existing["id"] if isinstance(existing, dict) else existing[0]
+            conn.execute(
+                "UPDATE inspection_checklist_templates SET description=?, inspection_type=?, standard_reference=?, is_system=1, active=1, updated_at=? WHERE id=?",
+                (description, inspection_type, standard_reference, now_iso(), template_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO inspection_checklist_templates (name, description, inspection_type, standard_reference, is_system, active) VALUES (?, ?, ?, ?, 1, 1)",
+                (name, description, inspection_type, standard_reference),
+            )
+            inserted = conn.execute(
+                "SELECT id FROM inspection_checklist_templates WHERE name=?", (name,)
+            ).fetchone()
+            template_id = inserted["id"] if isinstance(inserted, dict) else inserted[0]
+        for position, (category, item, requires_photo) in enumerate(items, start=1):
+            conn.execute(
+                "INSERT INTO inspection_checklist_template_items (template_id, category, item, requires_photo, sort_order) VALUES (?, ?, ?, ?, ?) ON CONFLICT(template_id, item) DO UPDATE SET category=excluded.category, requires_photo=excluded.requires_photo, sort_order=excluded.sort_order",
+                (template_id, category, item, int(requires_photo), position),
+            )
 
 
 def _backfill_cash_entries(conn: sqlite3.Connection | PostgresConnection) -> None:

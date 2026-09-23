@@ -75,6 +75,8 @@ def _photo_cell(photo: dict, styles) -> Table:
     image.drawHeight = image.imageHeight * scale
     image.hAlign = "CENTER"
     caption = photo.get("caption") or photo.get("filename") or "Evidência fotográfica"
+    if photo.get("checklist_item"):
+        caption = f"Item: {photo['checklist_item']} · {caption}"
     cell = Table(
         [[image], [Paragraph(f"<b>{_safe(photo['category'])}</b> · {_safe(caption)}", styles["DocSmallCenter"])]],
         colWidths=[8.15 * cm],
@@ -160,11 +162,19 @@ def generate_inspection_pdf(inspection_id: int, save_path: str | Path | None = N
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]
     for row_number, item in enumerate(items, start=1):
+        details = [item.get("notes") or ""]
+        if item.get("replacement_part"):
+            part = f"Peça: {item['replacement_part']}"
+            if item.get("replacement_serial"):
+                part += f" · Série: {item['replacement_serial']}"
+            details.append(part)
+        if item.get("corrective_order_number"):
+            details.append(f"O.S. corretiva: {item['corrective_order_number']}")
         checklist_data.append([
             Paragraph(_safe(item["category"]), styles["DocSmall"]),
             Paragraph(_safe(item["item"]), styles["DocSmall"]),
             Paragraph(_safe(item["status"]), styles["DocSmallCenter"]),
-            Paragraph(_safe(item.get("notes")), styles["DocSmall"]),
+            Paragraph(_safe(" | ".join(filter(None, details))), styles["DocSmall"]),
         ])
         checklist_style.append(("BACKGROUND", (2, row_number), (2, row_number), STATUS_COLORS.get(item["status"], colors.white)))
     checklist = Table(checklist_data, colWidths=[3.1 * cm, 6.4 * cm, 2.65 * cm, 5.05 * cm], repeatRows=1)

@@ -19,7 +19,8 @@ Sistema profissional para estruturar o pós-venda e o pré-dimensionamento de pr
 - Ordens de serviço com endereço, contato, instruções, materiais, PDF e link individual para a equipe de campo.
 - Atualização da O.S. pelo técnico e possibilidade de invalidar o link anterior.
 - Vistorias técnicas mobile-first, vinculadas a cliente, usina e ordem de serviço, com link individual para a equipe de campo.
-- Checklist elétrico e fotovoltaico, posição solar, sombreamento, coordenadas, medições CC/CA, aterramento, diagnóstico, retorno e até 20 fotos por vistoria.
+- Checklist elétrico e fotovoltaico por blocos, com modelo básico e manutenção preventiva completa de 71 itens, posição solar, medições CC/CA, peças substituídas e até 20 fotos por vistoria.
+- Modelos de checklist reutilizáveis, evidências vinculadas a cada item e abertura de O.S. corretiva diretamente de uma não conformidade.
 - Relatório fotográfico de vistoria em PDF com identidade visual configurável, resultados destacados e assinatura técnica padronizada.
 - Gerador de contratos para pós-venda, manutenção, consultoria e projetos, com histórico e PDF.
 - Cálculo de cobertura, desempenho, disponibilidade e economia estimada.
@@ -103,7 +104,7 @@ Cada O.S. recebe um código aleatório. O link abre uma visualização de campo 
 
 ## Vistorias em celular e tablet
 
-Na página **Vistorias**, crie a ficha, vincule uma O.S. quando aplicável e envie o link individual pelo WhatsApp. A ficha abre sem o menu administrativo, adapta os campos à tela do aparelho e permite fotografar com a câmera ou selecionar imagens da galeria. As fotos são reduzidas antes do armazenamento para economizar espaço no banco gratuito. Ao concluir, o relatório em PDF reúne identificação, condições do local, posição solar, medições, checklist, diagnóstico, fotos e assinaturas.
+Na página **Vistorias**, escolha o modelo de checklist, crie a ficha, vincule uma O.S. quando aplicável e envie o link individual pelo WhatsApp. A ficha abre sem o menu administrativo e, no celular, o checklist é preenchido e salvo por blocos. Fotos da câmera ou galeria podem ser ligadas ao item verificado; peças e números de série ficam registrados. Uma não conformidade pode gerar uma O.S. corretiva já vinculada. Ao concluir, o PDF reúne identificação, condições do local, medições, checklist, peças, ordens corretivas, diagnóstico, fotos e assinaturas.
 
 ## Contratos de serviço
 
