@@ -60,7 +60,7 @@ with st.container(horizontal=True):
 
 if int(metrics.get("estimated_plants", 0)):
     st.caption(
-        f"Estimativa aplicada a {int(metrics['estimated_plants'])} usina(s) sem leitura no mês: potência instalada × produtividade solar média do estado. "
+        f"Estimativa aplicada a {int(metrics['estimated_plants'])} usina(s) sem leitura no mês: previsão mensal cadastrada ou potência instalada × produtividade solar média do estado. "
         "A economia usa a última tarifa registrada ou R$ 0,95/kWh como referência. Ao lançar a leitura real, ela substitui automaticamente a estimativa."
     )
 
