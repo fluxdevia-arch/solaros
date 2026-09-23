@@ -20,6 +20,7 @@ ALL_PAGE_PATHS = [
     "app_pages/integrations.py",
     "app_pages/inverter_diagnostics.py",
     "app_pages/equipment_analysis.py",
+    "app_pages/fault_guide.py",
     "app_pages/operations.py",
     "app_pages/service_orders.py",
     "app_pages/inspections.py",

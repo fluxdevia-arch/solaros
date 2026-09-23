@@ -68,6 +68,7 @@ pages = {
         st.Page("app_pages/integrations.py", title="Integrações", icon=":material/api:"),
         st.Page("app_pages/inverter_diagnostics.py", title="Diagnóstico por Excel", icon=":material/analytics:"),
         st.Page("app_pages/equipment_analysis.py", title="Análise de equipamentos", icon=":material/vital_signs:"),
+        st.Page("app_pages/fault_guide.py", title="Guia de falhas", icon=":material/troubleshoot:"),
         st.Page("app_pages/operations.py", title="Operação e agenda", icon=":material/build:"),
         st.Page("app_pages/service_orders.py", title="Ordens de serviço", icon=":material/assignment:"),
         st.Page("app_pages/inspections.py", title="Vistorias", icon=":material/fact_check:"),

@@ -57,6 +57,27 @@ with st.container(horizontal=True):
         border=True,
     )
 
+om_summary = dashboard_frame(
+    """SELECT
+       COALESCE(SUM(CASE WHEN fc.status NOT IN ('Resolvida','Encerrada sem solução') THEN 1 ELSE 0 END),0) AS active_cases,
+       COALESCE(SUM(CASE WHEN fc.status NOT IN ('Resolvida','Encerrada sem solução') AND f.severity='Crítica' THEN 1 ELSE 0 END),0) AS critical_cases,
+       COALESCE(SUM(CASE WHEN fc.status='Aguardando reverificação' THEN 1 ELSE 0 END),0) AS awaiting_recheck,
+       COALESCE(SUM(CASE WHEN fc.service_order_id IS NULL AND fc.status NOT IN ('Resolvida','Encerrada sem solução') THEN 1 ELSE 0 END),0) AS without_order
+       FROM fault_cases fc JOIN fault_catalog f ON f.id=fc.fault_id""",
+    (),
+    db_identity,
+    SCHEMA_VERSION,
+)
+if not om_summary.empty:
+    om = om_summary.iloc[0]
+    with st.container(border=True):
+        st.subheader("Operação e manutenção", icon=":material/engineering:")
+        with st.container(horizontal=True):
+            st.metric("Casos técnicos ativos", int(om["active_cases"]), border=True)
+            st.metric("Falhas críticas", int(om["critical_cases"]), border=True)
+            st.metric("Aguardando reverificação", int(om["awaiting_recheck"]), border=True)
+            st.metric("Sem O.S. corretiva", int(om["without_order"]), border=True)
+
 trend = dashboard_frame(
     """SELECT r.reference_month AS month,
               SUM(r.generation_kwh)/1000.0 AS generation_mwh,

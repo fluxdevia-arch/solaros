@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -548,6 +548,56 @@ CREATE TABLE IF NOT EXISTS service_orders (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS fault_catalog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    manufacturer TEXT NOT NULL DEFAULT 'Multimarcas',
+    model_scope TEXT,
+    code TEXT,
+    title TEXT NOT NULL,
+    symptom_category TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'Média',
+    symptoms TEXT NOT NULL,
+    probable_causes TEXT NOT NULL,
+    verification_steps TEXT NOT NULL,
+    correction_steps TEXT NOT NULL,
+    safety_notes TEXT,
+    source_reference TEXT,
+    is_system INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(manufacturer, code, title)
+);
+
+CREATE TABLE IF NOT EXISTS fault_cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fault_id INTEGER NOT NULL REFERENCES fault_catalog(id) ON DELETE RESTRICT,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    plant_id INTEGER REFERENCES plants(id) ON DELETE SET NULL,
+    service_order_id INTEGER REFERENCES service_orders(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'Identificada',
+    observed_at TEXT NOT NULL,
+    symptom_notes TEXT,
+    measurements_before TEXT,
+    diagnosis_notes TEXT,
+    solution_applied TEXT,
+    parts_replaced TEXT,
+    solved_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS fault_rechecks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL REFERENCES fault_cases(id) ON DELETE CASCADE,
+    checked_at TEXT NOT NULL,
+    technician TEXT,
+    measurements_after TEXT,
+    result TEXT NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS site_inspections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     number TEXT UNIQUE,
@@ -775,6 +825,10 @@ CREATE INDEX IF NOT EXISTS idx_cash_due ON cash_transactions(due_date, status);
 CREATE INDEX IF NOT EXISTS idx_opportunities_stage ON opportunities(stage, next_action_date);
 CREATE INDEX IF NOT EXISTS idx_service_orders_status ON service_orders(status, scheduled_date);
 CREATE INDEX IF NOT EXISTS idx_service_orders_token ON service_orders(public_token);
+CREATE INDEX IF NOT EXISTS idx_fault_catalog_lookup ON fault_catalog(manufacturer, symptom_category, active);
+CREATE INDEX IF NOT EXISTS idx_fault_cases_status ON fault_cases(status, observed_at);
+CREATE INDEX IF NOT EXISTS idx_fault_cases_plant ON fault_cases(plant_id, status);
+CREATE INDEX IF NOT EXISTS idx_fault_rechecks_case ON fault_rechecks(case_id, checked_at);
 CREATE INDEX IF NOT EXISTS idx_site_inspections_status ON site_inspections(status, inspected_at);
 CREATE INDEX IF NOT EXISTS idx_special_sizing_client ON special_sizing_projects(client_id, system_type);
 CREATE INDEX IF NOT EXISTS idx_site_inspections_token ON site_inspections(public_token);
@@ -797,6 +851,7 @@ def init_db(seed: bool = True) -> None:
             conn.execute("SELECT pg_advisory_xact_lock(1397705807)")
         conn.executescript(SCHEMA)
         _ensure_schema_columns(conn)
+        _seed_fault_catalog(conn)
         count_row = conn.execute("SELECT COUNT(*) AS value FROM settings").fetchone()
         count = count_row["value"] if isinstance(count_row, dict) else count_row[0]
         fresh_install = count == 0
@@ -1078,6 +1133,140 @@ def _normalize_active_recurring_contracts(
                  AND reference_month>=?
                  AND status IN ('Pendente', 'Atrasado')""",
             (contract_id, month),
+        )
+
+
+def _seed_fault_catalog(conn: sqlite3.Connection | PostgresConnection) -> None:
+    """Install a conservative multibrand O&M knowledge base without overwriting user entries."""
+    faults = [
+        (
+            "Multimarcas", "Confirmar limites no manual do modelo", "GRID-GER-01",
+            "Inversor ligado sem geração", "Sem geração", "Alta",
+            "Inversor energizado, porém com potência ativa zerada ou sem produção durante janela solar.",
+            "Ausência de tensão CC; seccionadora aberta; proteção atuada; tensão de rede fora da faixa; bloqueio por alarme; comando de exportação zero.",
+            "Confirmar horário e irradiância; registrar alarmes; medir tensão CC e CA com procedimento seguro; verificar seccionadoras e proteções; comparar com o datasheet.",
+            "Restabelecer somente o circuito cuja causa foi confirmada; corrigir proteção, parametrização ou conexão defeituosa; acionar fabricante quando houver bloqueio interno.",
+            "Não abrir o inversor energizado. Aplicar bloqueio, etiquetagem e requisitos de trabalho elétrico antes de qualquer medição.",
+        ),
+        (
+            "Multimarcas", "Arranjos equivalentes e mesma orientação", "GRID-GER-02",
+            "Geração abaixo do esperado", "Baixa geração", "Média",
+            "Curva abaixo do histórico ou de usinas equivalentes sem parada total do equipamento.",
+            "Sujeira; sombreamento; limitação por temperatura; clipping; indisponibilidade parcial; tensão de rede elevada; degradação ou erro de referência.",
+            "Comparar período, clima e irradiância; revisar alarmes; confrontar MPPTs; inspecionar módulos e ventilação; validar potência instalada e expectativa mensal.",
+            "Executar limpeza ou correção somente após confirmar a causa; corrigir sombreamento, ventilação, conexão ou cadastro de referência conforme o caso.",
+            "A conclusão exige comparação com dados climáticos, histórico e inspeção. Não prometer ganho antes da causa ser confirmada.",
+        ),
+        (
+            "Multimarcas", "Rede CA e parâmetros da distribuidora", "GRID-REDE-01",
+            "Desarme por tensão de rede elevada", "Rede elétrica", "Alta",
+            "Inversor desliga ou reduz potência principalmente nos horários de maior geração; log indica sobretensão ou rede fora da faixa.",
+            "Elevação de tensão no ponto de conexão; cabo CA subdimensionado; conexão frouxa; parâmetro incorreto; transformador ou rede da distribuidora saturada.",
+            "Registrar tensão por fase no inversor e no padrão durante geração; conferir bitola, distância e conexões; comparar parâmetros com norma e distribuidora.",
+            "Corrigir queda ou elevação interna comprovada; reapertar ou substituir conexão conforme torque do fabricante; solicitar avaliação da distribuidora quando a origem for externa.",
+            "Não alterar limites de proteção para mascarar a sobretensão. Parametrização deve seguir fabricante, distribuidora e responsável técnico.",
+        ),
+        (
+            "Multimarcas", "Strings comparáveis no mesmo MPPT", "GRID-CC-01",
+            "Corrente baixa ou desequilíbrio entre strings", "Strings e MPPT", "Alta",
+            "Uma string ou MPPT entrega corrente significativamente menor que canais equivalentes nas mesmas condições.",
+            "Sombra; sujeira localizada; conector com mau contato; fusível aberto; módulo danificado; string incompleta; polaridade ou medição incorreta.",
+            "Comparar apenas arranjos equivalentes; revisar corrente e tensão; inspecionar conectores, fusíveis e módulos; usar termografia e curva I-V quando aplicável.",
+            "Substituir o componente identificado, refazer conexão com ferramenta homologada ou corrigir o arranjo; repetir as medições após a intervenção.",
+            "Corrente de string e conectores CC exigem procedimento específico. Não desconectar conector sob carga.",
+        ),
+        (
+            "Multimarcas", "Circuito CC, módulos e cabos", "GRID-ISO-01",
+            "Resistência de isolamento baixa", "Isolamento e terra", "Crítica",
+            "Alarme de isolamento, fuga à terra ou bloqueio antes da conexão com a rede.",
+            "Cabo danificado; conector com umidade; módulo com falha; caixa de junção; esmagamento de cabo; aterramento indevido do polo CC.",
+            "Desenergizar e segmentar o arranjo; medir isolamento com instrumento e tensão de ensaio adequados ao fabricante; inspecionar cabos, conectores e módulos.",
+            "Isolar o trecho defeituoso e substituir o componente comprometido; restaurar vedação e roteamento; reverificar antes de religar.",
+            "Condição potencialmente perigosa. Exige profissional habilitado, bloqueio e confirmação de ausência de tensão conforme o procedimento aplicável.",
+        ),
+        (
+            "Multimarcas", "Proteções e equipotencialização", "GRID-RCMU-01",
+            "Corrente residual ou fuga à terra", "Isolamento e terra", "Crítica",
+            "Desarmes por corrente residual, RCMU ou diferencial; ocorrência pode aumentar com umidade.",
+            "Falha de isolamento; umidade; capacitância do arranjo; cabo ou módulo danificado; conexão PE inadequada; filtro ou inversor com defeito.",
+            "Cruzar horário e clima; revisar alarmes; medir isolamento e continuidade do PE; inspecionar módulos, cabos, conectores e aterramento.",
+            "Corrigir o ponto de fuga confirmado e repetir ensaios; encaminhar o inversor ao suporte quando o defeito interno permanecer provável.",
+            "Não anular proteção diferencial ou aterramento para manter o sistema operando.",
+        ),
+        (
+            "Multimarcas", "Ventilação conforme instalação", "GRID-TEMP-01",
+            "Temperatura elevada ou redução térmica", "Temperatura", "Alta",
+            "Potência reduzida ou desligamentos acompanhados de temperatura interna elevada.",
+            "Ventilação obstruída; ventilador com falha; instalação sem afastamento; ambiente quente; sujeira; carga elevada ou sensor defeituoso.",
+            "Registrar temperatura e potência; conferir afastamentos; inspecionar entradas de ar, dissipadores e ventiladores; comparar com limites do manual.",
+            "Limpar conforme orientação do fabricante; liberar ventilação; substituir ventilador ou sensor confirmado; adequar local de instalação quando necessário.",
+            "Aguardar resfriamento e seguir o procedimento do fabricante antes de tocar dissipadores ou abrir o equipamento.",
+        ),
+        (
+            "Multimarcas", "Datalogger, rede e portal", "GRID-COM-01",
+            "Usina sem comunicação no portal", "Comunicação", "Média",
+            "Portal sem dados recentes, datalogger offline ou histórico interrompido, apesar de possível geração local.",
+            "Internet indisponível; Wi-Fi fraco; datalogger sem alimentação; configuração de rede; SIM sem dados; servidor ou cadastro incorreto.",
+            "Confirmar geração no display; verificar horário do último dado; testar alimentação, sinal e internet; revisar LEDs, rede e vínculo do dispositivo no portal.",
+            "Restabelecer alimentação ou rede; reconfigurar comunicação; substituir datalogger quando confirmado; validar o envio de novos pontos no portal.",
+            "Falha de comunicação não significa necessariamente falha de geração. Informe essa limitação no diagnóstico.",
+        ),
+        (
+            "Multimarcas", "Conectores, cabos e caixas CC", "GRID-ARCO-01",
+            "Indício de arco, aquecimento ou conector queimado", "Arco e aquecimento", "Crítica",
+            "Odor, escurecimento, derretimento, termografia anormal, estalos ou alarme de arco no circuito CC.",
+            "Crimpagem inadequada; conectores incompatíveis; mau contato; cabo danificado; entrada de água; torque incorreto; componente subdimensionado.",
+            "Interromper operação com segurança; inspecionar todo o par e trecho afetado; verificar compatibilidade, crimpagem, polaridade e temperatura; registrar evidências.",
+            "Substituir o conjunto comprometido com componentes compatíveis e ferramenta correta; eliminar dano adjacente; realizar ensaio e termografia após o reparo.",
+            "Risco de incêndio. Não manipular conector energizado e não reutilizar partes carbonizadas.",
+        ),
+        (
+            "Multimarcas", "Rede CA", "GRID-REDE-02",
+            "Frequência de rede fora dos limites", "Rede elétrica", "Alta",
+            "Inversor desconecta com indicação de frequência alta, baixa ou instável.",
+            "Instabilidade da rede; gerador local; parametrização de país incorreta; medição ou placa de controle com falha.",
+            "Medir frequência com instrumento adequado; confrontar log e parâmetros de país; verificar ocorrência em outros equipamentos e comunicar a distribuidora quando necessário.",
+            "Corrigir parametrização apenas com autorização técnica; tratar a fonte local de instabilidade ou abrir ocorrência com a distribuidora.",
+            "Não ampliar limites de proteção fora das regras da distribuidora.",
+        ),
+        (
+            "Multimarcas", "Sistemas híbridos e off-grid", "GRID-BAT-01",
+            "Bateria não carrega ou autonomia reduzida", "Bateria e backup", "Alta",
+            "Estado de carga não sobe, carga interrompida, autonomia inferior ao esperado ou bateria indisponível.",
+            "Limite de carga; comunicação BMS; temperatura; tensão incompatível; configuração; envelhecimento; consumo superior ao projeto; conexão ou proteção atuada.",
+            "Revisar alarmes do BMS; registrar tensão, corrente, SOC e temperatura; conferir comunicação, parâmetros, capacidade útil e perfil real de cargas.",
+            "Corrigir comunicação e parâmetros homologados; adequar cargas; substituir módulo confirmado pelo fabricante; equalizar somente quando a tecnologia permitir.",
+            "Baterias apresentam risco elétrico, térmico e químico. Seguir integralmente o procedimento do fabricante e o plano de emergência.",
+        ),
+        (
+            "Multimarcas", "Proteções CC e CA", "GRID-PROT-01",
+            "DPS ou proteção atuada", "Proteções", "Alta",
+            "Indicador do DPS alterado, fusível aberto ou disjuntor desarmado, com perda total ou parcial da geração.",
+            "Surto; curto-circuito; sobrecorrente; envelhecimento; coordenação inadequada; falha a jusante; seleção incorreta do dispositivo.",
+            "Não rearmar antes de investigar; verificar estado, continuidade e dimensionamento; inspecionar circuito protegido e procurar sinais de dano ou aquecimento.",
+            "Eliminar a causa e substituir proteção por especificação equivalente e coordenada; registrar modelo e data; testar o circuito antes da energização.",
+            "Nunca pontear fusível, disjuntor ou DPS. A atuação pode indicar falha perigosa ainda presente.",
+        ),
+    ]
+    for row in faults:
+        manufacturer, model_scope, code, title, symptom_category, severity, symptoms, causes, verification, correction, safety = row
+        exists = conn.execute(
+            "SELECT id FROM fault_catalog WHERE manufacturer=? AND code=? AND title=?",
+            (manufacturer, code, title),
+        ).fetchone()
+        if exists:
+            continue
+        conn.execute(
+            """INSERT INTO fault_catalog
+               (manufacturer, model_scope, code, title, symptom_category, severity,
+                symptoms, probable_causes, verification_steps, correction_steps,
+                safety_notes, source_reference, is_system, active)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)""",
+            (
+                manufacturer, model_scope, code, title, symptom_category, severity,
+                symptoms, causes, verification, correction, safety,
+                "Orientação técnica multimarcas. Confirmar códigos, limites e procedimentos no manual oficial do modelo.",
+            ),
         )
 
 
@@ -1428,6 +1617,7 @@ def clear_business_data() -> None:
     """Remove demo/operational records while preserving company settings."""
     conn = connect()
     try:
+        conn.execute("DELETE FROM fault_cases")
         conn.execute("DELETE FROM special_sizing_projects")
         conn.execute("DELETE FROM sizing_projects")
         conn.execute("DELETE FROM pv_modules")

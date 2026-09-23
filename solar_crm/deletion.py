@@ -28,6 +28,8 @@ ENTITIES: dict[str, EntityDefinition] = {
     "contract": EntityDefinition("contracts", "contrato de pós-venda"),
     "opportunity": EntityDefinition("opportunities", "oportunidade"),
     "service_order": EntityDefinition("service_orders", "ordem de serviço"),
+    "fault_catalog": EntityDefinition("fault_catalog", "orientação da biblioteca de falhas"),
+    "fault_case": EntityDefinition("fault_cases", "caso técnico"),
     "inspection": EntityDefinition("site_inspections", "vistoria"),
     "inspection_photo": EntityDefinition("inspection_photos", "foto da vistoria"),
     "plant_equipment": EntityDefinition("plant_equipment", "equipamento da usina"),
@@ -68,6 +70,7 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
                 WHERE c.client_id=? AND i.deleted_at IS NULL) AS invoices,
                (SELECT COUNT(*) FROM service_contracts WHERE client_id=?) AS service_contracts,
                (SELECT COUNT(*) FROM service_orders WHERE client_id=?) AS service_orders,
+               (SELECT COUNT(*) FROM fault_cases WHERE client_id=?) AS fault_cases,
                (SELECT COUNT(*) FROM site_inspections WHERE client_id=?) AS inspections,
                (SELECT COUNT(*) FROM proposals WHERE client_id=?) AS proposals,
                (SELECT COUNT(*) FROM tasks WHERE client_id=?) AS tasks,
@@ -75,13 +78,14 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
                (SELECT COUNT(*) FROM opportunities WHERE client_id=?) AS opportunities,
                (SELECT COUNT(*) FROM sizing_projects WHERE client_id=?) AS sizing_projects,
                (SELECT COUNT(*) FROM special_sizing_projects WHERE client_id=?) AS special_sizing_projects""",
-            (rid,) * 12,
+            (rid,) * 13,
         ) or {}
         _append_count(lines, int(summary.get("plants", 0)), "usina vinculada", "usinas vinculadas")
         _append_count(lines, int(summary.get("contracts", 0)), "contrato de pós-venda", "contratos de pós-venda")
         _append_count(lines, int(summary.get("invoices", 0)), "cobrança vinculada", "cobranças vinculadas")
         _append_count(lines, int(summary.get("service_contracts", 0)), "contrato de serviço", "contratos de serviço")
         _append_count(lines, int(summary.get("service_orders", 0)), "ordem de serviço", "ordens de serviço")
+        _append_count(lines, int(summary.get("fault_cases", 0)), "caso técnico", "casos técnicos")
         _append_count(lines, int(summary.get("inspections", 0)), "vistoria", "vistorias")
         _append_count(lines, int(summary.get("proposals", 0)), "proposta", "propostas")
         _append_count(lines, int(summary.get("tasks", 0)), "atividade", "atividades")
@@ -104,9 +108,10 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
                (SELECT COUNT(*) FROM tasks WHERE plant_id=?) AS tasks,
                (SELECT COUNT(*) FROM tickets WHERE plant_id=?) AS tickets,
                (SELECT COUNT(*) FROM service_orders WHERE plant_id=?) AS service_orders,
+               (SELECT COUNT(*) FROM fault_cases WHERE plant_id=?) AS fault_cases,
                (SELECT COUNT(*) FROM site_inspections WHERE plant_id=?) AS inspections,
                (SELECT COUNT(*) FROM cash_transactions WHERE plant_id=?) AS cash""",
-            (rid,) * 10,
+            (rid,) * 11,
         ) or {}
         _append_count(lines, int(summary.get("readings", 0)), "leitura mensal", "leituras mensais")
         _append_count(lines, int(summary.get("beneficiaries", 0)), "beneficiária", "beneficiárias")
@@ -114,7 +119,7 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
         _append_count(lines, int(summary.get("equipment", 0)), "equipamento cadastrado", "equipamentos cadastrados")
         _append_count(lines, int(summary.get("curve_analyses", 0)), "análise de curva", "análises de curva")
         _append_count(lines, int(summary.get("tasks", 0)), "atividade", "atividades")
-        detached = sum(int(summary.get(key, 0)) for key in ("tickets", "service_orders", "inspections", "cash"))
+        detached = sum(int(summary.get(key, 0)) for key in ("tickets", "service_orders", "fault_cases", "inspections", "cash"))
         if detached:
             lines.append(f"{detached} registro(s) serão preservados, mas ficarão sem vínculo com a usina")
     elif entity == "beneficiary":
@@ -142,6 +147,11 @@ def deletion_impact(entity: str, record_id: int) -> list[str]:
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM cash_transactions WHERE source_type='service_contract' AND source_id=?", (rid,)), "lançamento correspondente no caixa", "lançamentos correspondentes no caixa")
     elif entity == "service_order":
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM site_inspections WHERE service_order_id=?", (rid,)), "vistoria que será preservada sem vínculo com a O.S.", "vistorias que serão preservadas sem vínculo com a O.S.")
+        _append_count(lines, _count("SELECT COUNT(*) AS value FROM fault_cases WHERE service_order_id=?", (rid,)), "caso técnico que será preservado sem vínculo com a O.S.", "casos técnicos que serão preservados sem vínculo com a O.S.")
+    elif entity == "fault_catalog":
+        _append_count(lines, _count("SELECT COUNT(*) AS value FROM fault_cases WHERE fault_id=?", (rid,)), "caso técnico que bloqueia a exclusão", "casos técnicos que bloqueiam a exclusão")
+    elif entity == "fault_case":
+        _append_count(lines, _count("SELECT COUNT(*) AS value FROM fault_rechecks WHERE case_id=?", (rid,)), "reverificação", "reverificações")
     elif entity == "inspection":
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM inspection_checklist_items WHERE inspection_id=?", (rid,)), "item de checklist", "itens de checklist")
         _append_count(lines, _count("SELECT COUNT(*) AS value FROM inspection_photos WHERE inspection_id=?", (rid,)), "foto", "fotos")
@@ -180,6 +190,18 @@ def delete_record(entity: str, record_id: int) -> None:
             if count:
                 raise DeletionBlocked(
                     f"Este equipamento está sendo usado em {count} projeto(s). Exclua primeiro os projetos de dimensionamento vinculados."
+                )
+
+        if entity == "fault_catalog":
+            row = conn.execute("SELECT is_system FROM fault_catalog WHERE id=?", (rid,)).fetchone()
+            is_system = int(row["is_system"] if isinstance(row, dict) else row[0])
+            if is_system:
+                raise DeletionBlocked("As orientações padrão do sistema não podem ser excluídas.")
+            used = conn.execute("SELECT COUNT(*) AS value FROM fault_cases WHERE fault_id=?", (rid,)).fetchone()
+            count = int(used["value"] if isinstance(used, dict) else used[0])
+            if count:
+                raise DeletionBlocked(
+                    f"Esta orientação está vinculada a {count} caso(s) técnico(s). Exclua primeiro os casos vinculados."
                 )
 
         if entity == "client":

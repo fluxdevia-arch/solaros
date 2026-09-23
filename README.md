@@ -13,6 +13,8 @@ Sistema profissional para estruturar o pós-venda e o pré-dimensionamento de pr
 - SolarZ como integração principal, com credenciais protegidas pelo Windows, importação de usinas, geração diária e desempenho mensal.
 - Conectores diretos opcionais com Growatt OpenAPI e SolisCloud.
 - Análise de equipamentos com comparação de strings por MPPT, estimativa de perdas, causas prováveis e histórico exportável de falhas e alarmes.
+- Guia de falhas multimarcas com busca por referência, sintoma e causa, diagnóstico guiado, abertura de caso técnico e geração de O.S. corretiva.
+- Registro da solução aplicada e reverificação posterior, preservando medições antes e depois da intervenção.
 - Kanban comercial com etapas, valor do funil, probabilidade, responsável e próxima ação.
 - Ordens de serviço com endereço, contato, instruções, materiais, PDF e link individual para a equipe de campo.
 - Atualização da O.S. pelo técnico e possibilidade de invalidar o link anterior.
