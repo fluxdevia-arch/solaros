@@ -24,6 +24,8 @@ Sistema profissional para estruturar o pós-venda e o pré-dimensionamento de pr
 - Agenda preventiva automática por usina, contrato e periodicidade, com geração antecipada de ordens de serviço.
 - Estoque de peças e consumíveis com saldo mínimo, entradas, saídas e baixa vinculada à O.S. executada.
 - Dashboard com estimativa regional de geração e economia quando a leitura real do mês ainda não foi lançada.
+- Perfis de acesso por usuário: Administrador, Técnico, Financeiro e Comercial, com menus compatíveis com cada função.
+- Aceite digital do cliente nas ordens de serviço e vistorias, com assinatura, documento e data/hora registrados no PDF.
 - Relatório fotográfico de vistoria em PDF com identidade visual configurável, resultados destacados e assinatura técnica padronizada.
 - Gerador de contratos para pós-venda, manutenção, consultoria e projetos, com histórico e PDF.
 - Cálculo de cobertura, desempenho, disponibilidade e economia estimada.

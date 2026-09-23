@@ -1,11 +1,14 @@
 import streamlit as st
 
+from solar_crm.auth import ROLES, list_app_users, require_role, save_app_user
 from solar_crm.branding import configured_app_name, configured_logo, normalize_brand_logo
 from solar_crm.db import clear_business_data, execute, get_db_path, query_one, using_postgres
 from solar_crm.document_cache import clear_document_caches
 from solar_crm.signature import normalize_signature_image
 from solar_crm.sharing import resolve_share_base_url
 from solar_crm.ui import flash, page_intro, show_flash
+
+require_role("Administrador")
 
 page_intro("Configure a identidade dos documentos, o compartilhamento e a proteção dos dados.")
 show_flash()
@@ -107,6 +110,58 @@ with left:
             st.info("Nenhuma assinatura manuscrita cadastrada. O relatório continuará exibindo o bloco profissional digitado.", icon=":material/draw:")
 
 with right:
+    with st.container(border=True):
+        st.subheader("Usuários e permissões", icon=":material/manage_accounts:")
+        st.caption("O login continua protegido pelo provedor de identidade. Aqui você define quem entra e o que cada pessoa pode acessar.")
+        with st.expander("O que cada perfil acessa", icon=":material/info:"):
+            st.markdown(
+                "- **Administrador:** sistema completo, configurações e usuários.\n"
+                "- **Técnico:** gestão, pós-venda, engenharia, O.S., vistorias e estoque.\n"
+                "- **Financeiro:** clientes, usinas, leituras, auditorias, relatórios, caixa e contratos.\n"
+                "- **Comercial:** clientes, usinas, kanban, propostas, precificação, caixa e contratos."
+            )
+        users = list_app_users()
+        if users:
+            st.dataframe(
+                [
+                    {
+                        "Nome": row.get("name") or "-",
+                        "E-mail": row["email"],
+                        "Perfil": row["role"],
+                        "Ativo": bool(row["active"]),
+                    }
+                    for row in users
+                ],
+                hide_index=True,
+                width="stretch",
+            )
+        user_map = {f"{row.get('name') or row['email']} · {row['role']}": row for row in users}
+        mode = st.segmented_control("Ação", ["Convidar", "Editar"], default="Convidar")
+        selected_user = None
+        if mode == "Editar" and user_map:
+            selected_user = user_map[st.selectbox("Usuário", list(user_map))]
+        with st.form("app_user_permissions", clear_on_submit=mode == "Convidar"):
+            user_name = st.text_input("Nome", value=(selected_user or {}).get("name") or "")
+            user_email = st.text_input(
+                "E-mail de login",
+                value=(selected_user or {}).get("email") or "",
+                disabled=bool(selected_user),
+            )
+            default_role = (selected_user or {}).get("role") or "Técnico"
+            user_role = st.selectbox("Perfil", ROLES, index=ROLES.index(default_role))
+            user_active = st.toggle("Acesso ativo", value=bool((selected_user or {}).get("active", True)))
+            if st.form_submit_button("Salvar permissões", type="primary", icon=":material/save:"):
+                current = st.session_state.get("app_user", {})
+                if selected_user and selected_user["email"] == current.get("email") and (not user_active or user_role != "Administrador"):
+                    st.error("Você não pode remover o próprio acesso de administrador.")
+                else:
+                    try:
+                        save_app_user(user_email, user_name, user_role, user_active)
+                        flash("Permissões do usuário salvas.")
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+
     with st.container(border=True):
         st.subheader("Banco de dados", icon=":material/database:")
         if using_postgres():

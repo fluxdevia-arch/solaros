@@ -26,10 +26,11 @@ from solar_crm.inspections import (
     inspection_photos,
     inspection_share_url,
     list_inspection_templates,
+    save_inspection_signature,
     update_inspection,
 )
 from solar_crm.sharing import resolve_share_base_url
-from solar_crm.ui import date_br, flash, page_intro, render_delete_control, show_flash
+from solar_crm.ui import date_br, datetime_br, flash, page_intro, render_delete_control, show_flash
 
 
 INSPECTION_TYPES = [
@@ -45,6 +46,46 @@ ORIENTATIONS = ["Norte", "Nordeste", "Leste", "Sudeste", "Sul", "Sudoeste", "Oes
 PHOTO_CATEGORIES = ["Vista geral", "Módulos", "Cobertura e estrutura", "Inversor", "Quadros e proteções", "Cabos e conectores", "Aterramento", "Falha encontrada", "Serviço executado", "Outras evidências"]
 
 ensure_inspection_schema()
+
+
+def _render_client_signature(inspection: dict, key_suffix: str) -> None:
+    if inspection.get("client_signed_at") and inspection.get("client_signature_image"):
+        st.success(
+            f"Aceite assinado por {inspection.get('client_signer_name')} em {datetime_br(inspection.get('client_signed_at'))}.",
+            icon=":material/verified:",
+        )
+        st.image(inspection["client_signature_image"], width=300)
+        st.caption(f"Documento do signatário: {inspection.get('client_signer_document') or '-'}")
+        return
+    with st.form(f"inspection_signature_{key_suffix}"):
+        signer_name = st.text_input(
+            "Nome completo do responsável",
+            value=inspection.get("contact_name") or "",
+        )
+        signer_document = st.text_input("CPF ou documento do responsável")
+        signature_upload = st.file_uploader(
+            "Imagem da assinatura",
+            type=["png", "jpg", "jpeg"],
+            max_upload_size=5,
+            help="Envie ou fotografe a assinatura escura sobre papel claro.",
+        )
+        signature_camera = st.camera_input("Ou fotografar a assinatura agora")
+        consent = st.checkbox(
+            "Declaro que fui informado sobre esta vistoria, conferi o registro e autorizo o uso desta assinatura no relatório."
+        )
+        if st.form_submit_button("Assinar vistoria", type="primary", icon=":material/verified:"):
+            image = signature_camera or signature_upload
+            if image is None:
+                st.error("Envie ou fotografe a assinatura.")
+            else:
+                try:
+                    save_inspection_signature(
+                        inspection["id"], signer_name, signer_document, image.getvalue(), consent
+                    )
+                    st.success("Aceite registrado com data e hora.")
+                    st.rerun()
+                except (ValueError, OSError) as exc:
+                    st.error(str(exc))
 
 
 def _date_value(value: object, fallback: date | None = None) -> date:
@@ -393,6 +434,8 @@ if token:
         st.markdown(f"**Contato:** {current.get('contact_name') or '-'} · {current.get('contact_phone') or '-'}")
         st.markdown(f"[Abrir rota no mapa](https://www.google.com/maps/search/?api=1&query={quote(current['address'])})")
     _render_field_form(current)
+    with st.expander("Assinatura e aceite do cliente", expanded=not bool(current.get("client_signed_at")), icon=":material/draw:"):
+        _render_client_signature(current, f"public_{current['id']}")
     st.subheader("Evidências salvas", icon=":material/photo_library:")
     _show_saved_photos(current["id"])
     st.download_button(
@@ -576,6 +619,8 @@ if inspections:
     if evidence.open:
         with evidence:
             _show_saved_photos(selected["id"])
+    with st.expander("Assinatura do cliente", icon=":material/draw:"):
+        _render_client_signature(selected, f"admin_{selected['id']}")
     render_delete_control(
         "inspection",
         selected["id"],

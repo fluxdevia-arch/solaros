@@ -36,6 +36,16 @@ def date_br(value: str | date | None) -> str:
         return str(value)
 
 
+def datetime_br(value: str | datetime | None) -> str:
+    if not value:
+        return "-"
+    try:
+        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+        return parsed.strftime("%d/%m/%Y às %H:%M")
+    except ValueError:
+        return str(value)
+
+
 def page_intro(text: str) -> None:
     st.caption(text)
 

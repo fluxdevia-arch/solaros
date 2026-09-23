@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -163,6 +163,16 @@ CREATE TABLE IF NOT EXISTS settings (
     signature_image BLOB,
     signature_image_mime TEXT,
     share_base_url TEXT DEFAULT 'http://localhost:8501'
+);
+
+CREATE TABLE IF NOT EXISTS app_users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE,
+    name TEXT,
+    role TEXT NOT NULL DEFAULT 'Técnico',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS clients (
@@ -543,6 +553,12 @@ CREATE TABLE IF NOT EXISTS service_orders (
     safety_instructions TEXT,
     materials TEXT,
     completion_notes TEXT,
+    client_signer_name TEXT,
+    client_signer_document TEXT,
+    client_signature_image BLOB,
+    client_signature_mime TEXT,
+    client_signed_at TEXT,
+    client_signature_consent INTEGER NOT NULL DEFAULT 0,
     completed_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -663,6 +679,12 @@ CREATE TABLE IF NOT EXISTS site_inspections (
     materials_needed TEXT,
     follow_up_date TEXT,
     client_acknowledgement TEXT,
+    client_signer_name TEXT,
+    client_signer_document TEXT,
+    client_signature_image BLOB,
+    client_signature_mime TEXT,
+    client_signed_at TEXT,
+    client_signature_consent INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -907,6 +929,7 @@ CREATE INDEX IF NOT EXISTS idx_cash_due ON cash_transactions(due_date, status);
 CREATE INDEX IF NOT EXISTS idx_opportunities_stage ON opportunities(stage, next_action_date);
 CREATE INDEX IF NOT EXISTS idx_service_orders_status ON service_orders(status, scheduled_date);
 CREATE INDEX IF NOT EXISTS idx_service_orders_token ON service_orders(public_token);
+CREATE INDEX IF NOT EXISTS idx_app_users_role ON app_users(active, role);
 CREATE INDEX IF NOT EXISTS idx_fault_catalog_lookup ON fault_catalog(manufacturer, symptom_category, active);
 CREATE INDEX IF NOT EXISTS idx_fault_cases_status ON fault_cases(status, observed_at);
 CREATE INDEX IF NOT EXISTS idx_fault_cases_plant ON fault_cases(plant_id, status);
@@ -1055,6 +1078,17 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
         }.items():
             conn.execute(f"ALTER TABLE inspection_checklist_items ADD COLUMN IF NOT EXISTS {name} {column_type}")
         conn.execute("ALTER TABLE inspection_photos ADD COLUMN IF NOT EXISTS checklist_item_id BIGINT REFERENCES inspection_checklist_items(id) ON DELETE SET NULL")
+        signature_additions = {
+            "client_signer_name": "TEXT",
+            "client_signer_document": "TEXT",
+            "client_signature_image": "BYTEA",
+            "client_signature_mime": "TEXT",
+            "client_signed_at": "TEXT",
+            "client_signature_consent": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for table in ("service_orders", "site_inspections"):
+            for name, column_type in signature_additions.items():
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {column_type}")
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_source ON cash_transactions(source_type, source_id)"
         )
@@ -1088,7 +1122,23 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
     if "deleted_at" not in invoice_columns:
         conn.execute("ALTER TABLE invoices ADD COLUMN deleted_at TEXT")
     table_additions = {
-        "site_inspections": {"template_id": "INTEGER REFERENCES inspection_checklist_templates(id) ON DELETE SET NULL"},
+        "service_orders": {
+            "client_signer_name": "TEXT",
+            "client_signer_document": "TEXT",
+            "client_signature_image": "BLOB",
+            "client_signature_mime": "TEXT",
+            "client_signed_at": "TEXT",
+            "client_signature_consent": "INTEGER NOT NULL DEFAULT 0",
+        },
+        "site_inspections": {
+            "template_id": "INTEGER REFERENCES inspection_checklist_templates(id) ON DELETE SET NULL",
+            "client_signer_name": "TEXT",
+            "client_signer_document": "TEXT",
+            "client_signature_image": "BLOB",
+            "client_signature_mime": "TEXT",
+            "client_signed_at": "TEXT",
+            "client_signature_consent": "INTEGER NOT NULL DEFAULT 0",
+        },
         "inspection_checklist_items": {
             "requires_photo": "INTEGER NOT NULL DEFAULT 0",
             "replacement_part": "TEXT",

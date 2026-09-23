@@ -9,6 +9,7 @@ from PIL import Image, ImageOps
 
 from solar_crm.checklists import BASIC_INSPECTION_CHECKLIST
 from solar_crm.db import connect, execute, execute_many, now_iso, query, query_one
+from solar_crm.signature import normalize_signature_image
 from solar_crm.workflow import create_service_order
 
 
@@ -55,6 +56,9 @@ CREATE TABLE IF NOT EXISTS site_inspections (
     inverter_alarms TEXT, safety_risks TEXT, findings TEXT, actions_performed TEXT,
     recommendations TEXT, materials_needed TEXT, follow_up_date TEXT,
     client_acknowledgement TEXT,
+    client_signer_name TEXT, client_signer_document TEXT,
+    client_signature_image BLOB, client_signature_mime TEXT,
+    client_signed_at TEXT, client_signature_consent INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -116,6 +120,15 @@ def ensure_inspection_schema() -> None:
         if getattr(conn, "is_postgres", False):
             conn.execute("ALTER TABLE site_inspections ADD COLUMN IF NOT EXISTS template_id BIGINT REFERENCES inspection_checklist_templates(id) ON DELETE SET NULL")
             for name, column_type in {
+                "client_signer_name": "TEXT",
+                "client_signer_document": "TEXT",
+                "client_signature_image": "BYTEA",
+                "client_signature_mime": "TEXT",
+                "client_signed_at": "TEXT",
+                "client_signature_consent": "INTEGER NOT NULL DEFAULT 0",
+            }.items():
+                conn.execute(f"ALTER TABLE site_inspections ADD COLUMN IF NOT EXISTS {name} {column_type}")
+            for name, column_type in {
                 "requires_photo": "INTEGER NOT NULL DEFAULT 0",
                 "replacement_part": "TEXT",
                 "replacement_serial": "TEXT",
@@ -125,7 +138,15 @@ def ensure_inspection_schema() -> None:
             conn.execute("ALTER TABLE inspection_photos ADD COLUMN IF NOT EXISTS checklist_item_id BIGINT REFERENCES inspection_checklist_items(id) ON DELETE SET NULL")
         else:
             additions = {
-                "site_inspections": {"template_id": "INTEGER REFERENCES inspection_checklist_templates(id) ON DELETE SET NULL"},
+                "site_inspections": {
+                    "template_id": "INTEGER REFERENCES inspection_checklist_templates(id) ON DELETE SET NULL",
+                    "client_signer_name": "TEXT",
+                    "client_signer_document": "TEXT",
+                    "client_signature_image": "BLOB",
+                    "client_signature_mime": "TEXT",
+                    "client_signed_at": "TEXT",
+                    "client_signature_consent": "INTEGER NOT NULL DEFAULT 0",
+                },
                 "inspection_checklist_items": {
                     "requires_photo": "INTEGER NOT NULL DEFAULT 0",
                     "replacement_part": "TEXT",
@@ -274,6 +295,27 @@ def update_inspection(inspection_id: int, values: dict, checklist: list[dict]) -
                 for position, row in enumerate(checklist, start=1)
             ],
         )
+
+
+def save_inspection_signature(
+    inspection_id: int,
+    signer_name: str,
+    signer_document: str,
+    signature_image: bytes,
+    consent: bool,
+) -> None:
+    name = signer_name.strip()
+    if not name or not signer_document.strip():
+        raise ValueError("Informe o nome e o documento do responsável.")
+    if not consent:
+        raise ValueError("O responsável deve confirmar a ciência antes de assinar.")
+    normalized = normalize_signature_image(signature_image)
+    execute(
+        """UPDATE site_inspections SET client_signer_name=?, client_signer_document=?,
+           client_signature_image=?, client_signature_mime='image/png', client_signed_at=?,
+           client_signature_consent=1, updated_at=? WHERE id=?""",
+        (name, signer_document.strip(), normalized, now_iso(), now_iso(), inspection_id),
+    )
 
 
 def compress_photo(image_bytes: bytes, max_side: int = 1600, quality: int = 82) -> tuple[bytes, str]:

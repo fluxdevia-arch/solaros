@@ -4,7 +4,7 @@ import uuid
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from solar_crm.db import init_db, query_one
 from solar_crm.inspection_documents import generate_inspection_pdf
@@ -17,6 +17,7 @@ from solar_crm.inspections import (
     inspection_items,
     inspection_share_url,
     list_inspection_templates,
+    save_inspection_signature,
     update_inspection,
 )
 from solar_crm.service_documents import generate_service_contract_pdf, generate_service_order_pdf
@@ -28,6 +29,7 @@ from solar_crm.workflow import (
     regenerate_service_order_token,
     service_order_by_token,
     service_order_share_url,
+    save_service_order_signature,
     update_service_order,
 )
 
@@ -87,6 +89,34 @@ class WorkflowTests(unittest.TestCase):
         pdf = generate_service_order_pdf(order_id)
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 3000)
+
+    def test_client_signatures_are_stored_and_rendered_in_field_pdfs(self):
+        client = query_one("SELECT id FROM clients ORDER BY id LIMIT 1")
+        plant = query_one("SELECT id, address FROM plants WHERE client_id=? ORDER BY id LIMIT 1", (client["id"],))
+        signature = BytesIO()
+        image = Image.new("RGB", (700, 240), "white")
+        draw = ImageDraw.Draw(image)
+        draw.line([(80, 160), (250, 80), (390, 170), (620, 70)], fill="black", width=10)
+        image.save(signature, format="PNG")
+
+        order_id = create_service_order({
+            "client_id": client["id"], "plant_id": plant["id"], "title": "Teste assinado",
+            "address": plant["address"], "work_description": "Validar aceite digital.",
+        })
+        save_service_order_signature(order_id, "Responsável Cliente", "123.456.789-00", signature.getvalue(), True)
+        signed_order = query_one("SELECT * FROM service_orders WHERE id=?", (order_id,))
+        self.assertEqual(signed_order["client_signature_consent"], 1)
+        self.assertIsNotNone(signed_order["client_signed_at"])
+        self.assertGreater(len(generate_service_order_pdf(order_id)), 3000)
+
+        inspection_id = create_inspection({
+            "client_id": client["id"], "plant_id": plant["id"], "inspected_at": "2026-09-23",
+            "address": plant["address"],
+        })
+        save_inspection_signature(inspection_id, "Responsável Cliente", "123.456.789-00", signature.getvalue(), True)
+        signed_inspection = inspection_details(inspection_id)
+        self.assertEqual(signed_inspection["client_signature_consent"], 1)
+        self.assertGreater(len(generate_inspection_pdf(inspection_id)), 3000)
 
     def test_service_contract_pdf(self):
         client = query_one("SELECT id FROM clients ORDER BY id LIMIT 1")

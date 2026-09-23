@@ -14,7 +14,7 @@ from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, Simple
 from solar_crm.branding import configured_app_name, configured_logo
 from solar_crm.calculations import money
 from solar_crm.db import query_one
-from solar_crm.ui import date_br
+from solar_crm.ui import date_br, datetime_br
 
 
 GREEN = HexColor("#0B7A53")
@@ -112,7 +112,7 @@ def _text_block(title: str, text: object, styles) -> list:
     return [Paragraph(title, styles["DocSection"]), *(paragraphs or [Paragraph("Não informado.", styles["DocBody"])])]
 
 
-def _technical_signature(company: dict, styles, include_client: bool = True) -> Table:
+def _technical_signature(company: dict, styles, include_client: bool = True, client_record: dict | None = None) -> Table:
     signature_area = Spacer(1, 1.05 * cm)
     if company.get("signature_image"):
         try:
@@ -144,11 +144,28 @@ def _technical_signature(company: dict, styles, include_client: bool = True) -> 
     technical.setStyle(common_style)
     if not include_client:
         return technical
+    client_signature: object = Spacer(1, 1.05 * cm)
+    client_name = "Responsável do cliente"
+    client_detail = "Nome e assinatura"
+    client_date = ""
+    if client_record and client_record.get("client_signature_image"):
+        try:
+            signed = Image(BytesIO(client_record["client_signature_image"]))
+            scale = min(5.2 * cm / signed.imageWidth, 1.0 * cm / signed.imageHeight)
+            signed.drawWidth = signed.imageWidth * scale
+            signed.drawHeight = signed.imageHeight * scale
+            signed.hAlign = "CENTER"
+            client_signature = signed
+            client_name = client_record.get("client_signer_name") or client_name
+            client_detail = f"Documento: {client_record.get('client_signer_document') or '-'}"
+            client_date = f"Aceite eletrônico: {datetime_br(client_record.get('client_signed_at'))}"
+        except Exception:
+            pass
     client = Table([
-        [Spacer(1, 1.05 * cm)],
-        [Paragraph("Responsável do cliente", styles["DocCenter"])],
-        [Paragraph("Nome e assinatura", styles["DocSmallCenter"])],
-        [Spacer(1, 0.15 * cm)],
+        [client_signature],
+        [Paragraph(_safe(client_name), styles["DocCenter"])],
+        [Paragraph(_safe(client_detail), styles["DocSmallCenter"])],
+        [Paragraph(_safe(client_date), styles["DocSmallCenter"])],
     ], colWidths=[7.4 * cm], rowHeights=row_heights)
     client.setStyle(common_style)
     signatures = Table([[technical, client]], colWidths=[8.6 * cm, 8.6 * cm])
@@ -196,7 +213,7 @@ def generate_service_order_pdf(order_id: int, save_path: str | Path | None = Non
             ["INVERSOR", order.get("inverter"), "MÓDULOS", order.get("modules")],
         ], styles, [2.7 * cm, 5.9 * cm, 2.7 * cm, 5.9 * cm]))
     story += _text_block("Registro da execução", order.get("completion_notes") or "Preencher após a execução do serviço.", styles)
-    story += [Spacer(1, 0.5 * cm), KeepTogether([_technical_signature(company, styles)])]
+    story += [Spacer(1, 0.5 * cm), KeepTogether([_technical_signature(company, styles, client_record=order)])]
     doc.build(
         story,
         onFirstPage=lambda c, d: _footer(c, d, company, order["number"]),

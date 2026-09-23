@@ -6,10 +6,10 @@ from solar_crm import db as db_module
 
 # Streamlit can hot-reload the entrypoint while keeping imported modules alive.
 # Reload an older database module before running a newly deployed migration.
-if int(getattr(db_module, "SCHEMA_VERSION", 0)) < 19:
+if int(getattr(db_module, "SCHEMA_VERSION", 0)) < 20:
     db_module = importlib.reload(db_module)
 
-from solar_crm.auth import render_user_sidebar, require_login
+from solar_crm.auth import current_app_user, render_user_sidebar, require_login
 from solar_crm.branding import configured_app_name, configured_logo
 from solar_crm.config import seed_demo_data
 
@@ -45,6 +45,18 @@ active_app_name = configured_app_name(app_settings)
 active_logo = configured_logo(app_settings)
 authenticated = False if field_mode else require_login(active_app_name, active_logo)
 
+if not field_mode:
+    app_user = current_app_user()
+    st.session_state["app_user"] = app_user
+    if not app_user.get("active"):
+        st.error("Seu login foi reconhecido, mas esta conta ainda não foi liberada no sistema.", icon=":material/person_alert:")
+        st.write("Peça a um administrador para cadastrar seu e-mail em **Configurações > Usuários e permissões**.")
+        if st.button("Sair", icon=":material/logout:"):
+            st.logout()
+        st.stop()
+else:
+    app_user = {"role": "Acesso de campo", "active": 1}
+
 if field_mode:
     st.logo(active_logo, size="large")
 
@@ -69,7 +81,7 @@ if field_inspection_mode:
     field_page.run()
     st.stop()
 
-pages = {
+all_pages = {
     "Gestão": [
         st.Page("app_pages/dashboard.py", title="Visão geral", icon=":material/space_dashboard:"),
         st.Page("app_pages/clients.py", title="Clientes e contratos", icon=":material/groups:"),
@@ -101,6 +113,33 @@ pages = {
         st.Page("app_pages/settings.py", title="Configurações", icon=":material/settings:"),
     ],
 }
+
+role = app_user.get("role")
+if role == "Administrador":
+    pages = all_pages
+elif role == "Técnico":
+    pages = {
+        "Gestão": all_pages["Gestão"],
+        "Pós-venda": all_pages["Pós-venda"],
+        "Engenharia": all_pages["Engenharia"],
+    }
+elif role == "Financeiro":
+    pages = {
+        "Gestão": all_pages["Gestão"],
+        "Financeiro": [
+            all_pages["Pós-venda"][0],  # Leituras e faturas
+            all_pages["Pós-venda"][1],  # Auditoria de faturas
+            all_pages["Pós-venda"][2],  # Compensação
+            all_pages["Pós-venda"][-1],  # Relatórios
+            all_pages["Comercial"][2],  # Caixa
+            all_pages["Comercial"][4],  # Contratos
+        ],
+    }
+else:  # Comercial
+    pages = {
+        "Gestão": all_pages["Gestão"],
+        "Comercial": all_pages["Comercial"][:-1],
+    }
 
 with st.sidebar:
     st.image(active_logo, width="stretch")

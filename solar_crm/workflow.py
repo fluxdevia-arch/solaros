@@ -6,6 +6,7 @@ from urllib.parse import quote
 
 from solar_crm.db import execute, now_iso, query_one
 from solar_crm.finance import sync_service_contract_to_cash, update_service_contract_cash_status
+from solar_crm.signature import normalize_signature_image
 
 
 OPPORTUNITY_STAGES = [
@@ -112,6 +113,27 @@ def update_service_order(order_id: int, status: str, completion_notes: str = "",
            assignee=CASE WHEN ?!='' THEN ? ELSE assignee END,
            completed_at=?, updated_at=? WHERE id=?""",
         (status, completion_notes.strip(), assignee.strip(), assignee.strip(), completed_at, now_iso(), order_id),
+    )
+
+
+def save_service_order_signature(
+    order_id: int,
+    signer_name: str,
+    signer_document: str,
+    signature_image: bytes,
+    consent: bool,
+) -> None:
+    name = signer_name.strip()
+    if not name or not signer_document.strip():
+        raise ValueError("Informe o nome e o documento do responsável.")
+    if not consent:
+        raise ValueError("O responsável deve confirmar a ciência antes de assinar.")
+    normalized = normalize_signature_image(signature_image)
+    execute(
+        """UPDATE service_orders SET client_signer_name=?, client_signer_document=?,
+           client_signature_image=?, client_signature_mime='image/png', client_signed_at=?,
+           client_signature_consent=1, updated_at=? WHERE id=?""",
+        (name, signer_document.strip(), normalized, now_iso(), now_iso(), order_id),
     )
 
 

@@ -8,15 +8,54 @@ from solar_crm.db import query, query_df, query_one
 from solar_crm.document_cache import service_order_pdf
 from solar_crm.maintenance import record_stock_movement, service_order_stock_movements, stock_items
 from solar_crm.sharing import resolve_share_base_url
-from solar_crm.ui import date_br, flash, page_intro, render_delete_control, show_flash
+from solar_crm.ui import date_br, datetime_br, flash, page_intro, render_delete_control, show_flash
 from solar_crm.workflow import (
     SERVICE_ORDER_STATUSES,
     create_service_order,
     regenerate_service_order_token,
+    save_service_order_signature,
     service_order_by_token,
     service_order_share_url,
     update_service_order,
 )
+
+
+def _render_client_signature(order: dict, key_suffix: str) -> None:
+    if order.get("client_signed_at") and order.get("client_signature_image"):
+        st.success(
+            f"Aceite assinado por {order.get('client_signer_name')} em {datetime_br(order.get('client_signed_at'))}.",
+            icon=":material/verified:",
+        )
+        st.image(order["client_signature_image"], width=300)
+        st.caption(f"Documento do signatário: {order.get('client_signer_document') or '-'}")
+        return
+    with st.form(f"client_signature_{key_suffix}"):
+        st.subheader("Aceite do cliente", icon=":material/draw:")
+        signer_name = st.text_input("Nome completo do responsável", value=order.get("contact_name") or "")
+        signer_document = st.text_input("CPF ou documento do responsável")
+        signature_upload = st.file_uploader(
+            "Imagem da assinatura",
+            type=["png", "jpg", "jpeg"],
+            max_upload_size=5,
+            help="Envie ou fotografe a assinatura escura sobre papel claro.",
+        )
+        signature_camera = st.camera_input("Ou fotografar a assinatura agora")
+        consent = st.checkbox(
+            "Declaro que li e estou de acordo com o registro desta ordem de serviço e autorizo o uso desta assinatura neste documento."
+        )
+        if st.form_submit_button("Assinar ordem de serviço", type="primary", icon=":material/verified:"):
+            image = signature_camera or signature_upload
+            if image is None:
+                st.error("Envie ou fotografe a assinatura.")
+            else:
+                try:
+                    save_service_order_signature(
+                        order["id"], signer_name, signer_document, image.getvalue(), consent
+                    )
+                    st.success("Aceite registrado com data e hora.")
+                    st.rerun()
+                except (ValueError, OSError) as exc:
+                    st.error(str(exc))
 
 
 def _render_order_stock(order_id: int) -> None:
@@ -90,6 +129,8 @@ if token:
             st.rerun()
     with st.expander("Materiais utilizados", icon=":material/inventory_2:"):
         _render_order_stock(order["id"])
+    with st.expander("Assinatura e aceite do cliente", expanded=not bool(order.get("client_signed_at")), icon=":material/draw:"):
+        _render_client_signature(order, f"public_{order['id']}")
     st.download_button(
         "Baixar ordem de serviço em PDF",
         service_order_pdf(order["id"], str(order.get("updated_at") or "")),
@@ -214,6 +255,8 @@ if orders:
                 st.rerun()
     with st.expander("Materiais utilizados e baixa no estoque", icon=":material/inventory_2:"):
         _render_order_stock(selected_order["id"])
+    with st.expander("Assinatura do cliente", icon=":material/draw:"):
+        _render_client_signature(selected_order, f"admin_{selected_order['id']}")
     render_delete_control(
         "service_order",
         selected_order["id"],

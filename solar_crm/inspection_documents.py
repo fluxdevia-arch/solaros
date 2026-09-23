@@ -198,7 +198,7 @@ def generate_inspection_pdf(inspection_id: int, save_path: str | Path | None = N
         Paragraph("Ciência e encerramento", styles["DocSection"]),
         Paragraph(_safe(inspection.get("client_acknowledgement") or "O responsável foi informado sobre as condições encontradas e as recomendações registradas neste relatório."), styles["DocBody"]),
         Spacer(1, 0.55 * cm),
-        KeepTogether([_technical_signature(company, styles)]),
+        KeepTogether([_technical_signature(company, styles, client_record=inspection)]),
         Spacer(1, 0.35 * cm),
         Paragraph(
             "Relatório baseado em inspeção visual, medições registradas e evidências coletadas no local. Intervenções elétricas devem observar os procedimentos de segurança e as normas aplicáveis.",

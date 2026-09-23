@@ -46,6 +46,18 @@ class DatabaseAndPdfTests(unittest.TestCase):
             os.environ["SOLAR_CRM_DB"] = self.previous_db
         self.db_path.unlink(missing_ok=True)
 
+    def test_application_users_have_persistent_roles(self):
+        from solar_crm.auth import list_app_users, save_app_user
+        from solar_crm.db import init_db
+
+        init_db(seed=False)
+        user_id = save_app_user("tecnico@example.com", "Técnico Solar", "Técnico", True)
+        self.assertGreater(user_id, 0)
+        saved = list_app_users()[0]
+        self.assertEqual(saved["email"], "tecnico@example.com")
+        self.assertEqual(saved["role"], "Técnico")
+        self.assertEqual(saved["active"], 1)
+
     def test_seed_dashboard_and_pdf(self):
         from solar_crm.db import available_months, clear_business_data, dashboard_metrics, execute, init_db, query_one, upsert_beneficiary_reading
         from solar_crm.pdf_report import generate_client_report
