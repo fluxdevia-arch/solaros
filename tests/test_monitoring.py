@@ -155,9 +155,24 @@ class MonitoringTests(unittest.TestCase):
         self.assertNotIn("Usuário de API na SolarZ", str(raised.exception))
 
     def test_solarz_is_the_primary_provider(self):
-        from solar_crm.monitoring import SUPPORTED_PROVIDERS
+        from solar_crm.monitoring import PROVIDER_CATALOG, PROVIDER_PROFILES, SUPPORTED_PROVIDERS
 
         self.assertEqual(SUPPORTED_PROVIDERS[0], SOLARZ)
+        self.assertTrue({
+            "GoodWe SEMS",
+            "Deye Cloud / Solarman",
+            "Huawei FusionSolar",
+            "Sungrow iSolarCloud",
+            "SAJ Elekeeper / eSolar",
+            "Solplanet Cloud",
+            "RENAC Power",
+            "AUXSOL Cloud",
+            "CHINT Power",
+            "SofarSolar",
+            "Fronius Solar.web",
+        }.issubset(PROVIDER_CATALOG))
+        active = [name for name in PROVIDER_CATALOG if PROVIDER_PROFILES[name].connector_active]
+        self.assertEqual(active, SUPPORTED_PROVIDERS)
 
     def test_discovery_link_and_monthly_sync(self):
         from solar_crm.db import init_db, query_one

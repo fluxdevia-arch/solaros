@@ -20,6 +20,17 @@ from solar_crm.secure_store import protect_secret, unprotect_secret
 GROWATT = "Growatt OpenAPI"
 SOLIS = "SolisCloud"
 SOLARZ = "SolarZ Monitoramento"
+GOODWE = "GoodWe SEMS"
+DEYE = "Deye Cloud / Solarman"
+HUAWEI = "Huawei FusionSolar"
+SUNGROW = "Sungrow iSolarCloud"
+SAJ = "SAJ Elekeeper / eSolar"
+SOLPLANET = "Solplanet Cloud"
+RENAC = "RENAC Power"
+AUXSOL = "AUXSOL Cloud"
+CHINT = "CHINT Power"
+SOFAR = "SofarSolar"
+FRONIUS = "Fronius Solar.web"
 SUPPORTED_PROVIDERS = [SOLARZ, GROWATT, SOLIS]
 DEFAULT_URLS = {
     SOLARZ: "https://app.solarz.com.br",
@@ -73,6 +84,8 @@ class ProviderProfile:
     secret_placeholder: str
     setup_steps: tuple[str, ...]
     documentation_url: str = ""
+    connector_active: bool = True
+    activation_note: str = ""
 
 
 PROVIDER_PROFILES = {
@@ -117,7 +130,180 @@ PROVIDER_PROFILES = {
             "Copie os dois valores exatamente como foram gerados; não use a senha comum do portal.",
         ),
     ),
+    GOODWE: ProviderProfile(
+        portal_name="GoodWe SEMS / OpenAPI",
+        credential_summary="Aplicativo OpenAPI aprovado + OAuth",
+        key_label="Client ID",
+        secret_label="Client Secret",
+        key_placeholder="Client ID do aplicativo GoodWe",
+        secret_placeholder="Client Secret do aplicativo GoodWe",
+        setup_steps=(
+            "Use uma conta de organização no SEMS Portal.",
+            "Cadastre um aplicativo no portal GoodWe OpenAPI e solicite aprovação.",
+            "Depois da aprovação, autorize as usinas da organização para o aplicativo.",
+        ),
+        documentation_url="https://openapi.goodwe.com/",
+        connector_active=False,
+        activation_note="A GoodWe precisa aprovar o aplicativo OpenAPI da GRID Engenharia antes da conexão.",
+    ),
+    DEYE: ProviderProfile(
+        portal_name="Deye Cloud / Solarman",
+        credential_summary="App ID + App Secret + autorização da conta",
+        key_label="App ID",
+        secret_label="App Secret",
+        key_placeholder="App ID do DeyeCloud Developer Portal",
+        secret_placeholder="App Secret do aplicativo",
+        setup_steps=(
+            "Cadastre a GRID Engenharia no DeyeCloud Developer Portal.",
+            "Crie um aplicativo OpenAPI e selecione o data center correto.",
+            "Autorize a conta que possui as usinas e gere o token de acesso.",
+        ),
+        documentation_url="https://developer.deyecloud.com/",
+        connector_active=False,
+        activation_note="É necessário criar e aprovar um aplicativo DeyeCloud para obter App ID e App Secret.",
+    ),
+    HUAWEI: ProviderProfile(
+        portal_name="Huawei FusionSolar",
+        credential_summary="Conta Northbound API",
+        key_label="Usuário Northbound",
+        secret_label="System Code",
+        key_placeholder="Usuário exclusivo da API Northbound",
+        secret_placeholder="System Code da conta Northbound",
+        setup_steps=(
+            "Entre no FusionSolar como administrador da empresa.",
+            "Acesse Sistema > Gestão da empresa > Gestão Northbound.",
+            "Crie a conta de API e autorize as usinas que ela poderá consultar.",
+        ),
+        documentation_url="https://info.support.huawei.com/enterprise/en/doc/EDOC1100307213/9e1a18d2/login-interface",
+        connector_active=False,
+        activation_note="Somente o administrador da empresa pode liberar a API Northbound da Huawei.",
+    ),
+    SUNGROW: ProviderProfile(
+        portal_name="Sungrow iSolarCloud",
+        credential_summary="AppKey + OAuth 2.0",
+        key_label="AppKey",
+        secret_label="App Secret",
+        key_placeholder="AppKey do Developer Portal",
+        secret_placeholder="Segredo do aplicativo Sungrow",
+        setup_steps=(
+            "Crie uma conta no Sungrow Developer Portal.",
+            "Cadastre um aplicativo e escolha o pacote de API de monitoramento.",
+            "Após a aprovação, autorize as usinas via OAuth 2.0.",
+        ),
+        documentation_url="https://developer-api.isolarcloud.com/",
+        connector_active=False,
+        activation_note="A Sungrow precisa aprovar o aplicativo e emitir a AppKey antes da integração.",
+    ),
+    SAJ: ProviderProfile(
+        portal_name="SAJ Elekeeper / eSolar",
+        credential_summary="App ID + App Secret + autorização das usinas",
+        key_label="App ID",
+        secret_label="App Secret",
+        key_placeholder="App ID do Elekeeper Developer Portal",
+        secret_placeholder="App Secret do aplicativo",
+        setup_steps=(
+            "Registre uma conta de desenvolvedor no portal Elekeeper.",
+            "Crie o aplicativo e obtenha App ID e App Secret.",
+            "Autorize as usinas ou dispositivos que a GRID poderá consultar.",
+        ),
+        documentation_url="https://iop.saj-electric.com/",
+        connector_active=False,
+        activation_note="A SAJ exige cadastro de desenvolvedor e autorização individual dos recursos.",
+    ),
+    SOLPLANET: ProviderProfile(
+        portal_name="Solplanet Cloud",
+        credential_summary="App Key + App Secret",
+        key_label="App Key",
+        secret_label="App Secret",
+        key_placeholder="App Key fornecida pela Solplanet",
+        secret_placeholder="App Secret correspondente",
+        setup_steps=(
+            "Confirme em qual plataforma as usinas estão: Solplanet App/Cloud ou AISWEI.",
+            "Solicite à Solplanet credenciais de integração para a conta instaladora.",
+            "Autorize as usinas para o aplicativo da GRID Engenharia.",
+        ),
+        documentation_url="https://solplanet.net/products/solplanet-app",
+        connector_active=False,
+        activation_note="A Solplanet fornece as credenciais após validar a conta instaladora.",
+    ),
+    RENAC: ProviderProfile(
+        portal_name="RENAC Power",
+        credential_summary="Credencial de integração iSEC",
+        key_label="Identificador da API",
+        secret_label="Segredo da API",
+        key_placeholder="Identificador fornecido pela RENAC",
+        secret_placeholder="Segredo fornecido pela RENAC",
+        setup_steps=(
+            "Confirme se as usinas estão no portal RENAC Power/iSEC.",
+            "Solicite ao suporte RENAC acesso de integração para a conta instaladora.",
+            "Autorize as usinas que serão consultadas pela GRID Engenharia.",
+        ),
+        connector_active=False,
+        activation_note="O acesso de API precisa ser liberado diretamente pela RENAC.",
+    ),
+    AUXSOL: ProviderProfile(
+        portal_name="AUXSOL Cloud",
+        credential_summary="Credencial de integração AUXSOL",
+        key_label="Identificador da API",
+        secret_label="Segredo da API",
+        key_placeholder="Identificador fornecido pela AUXSOL",
+        secret_placeholder="Segredo fornecido pela AUXSOL",
+        setup_steps=(
+            "Confirme a conta instaladora e a região do AUXSOL Cloud.",
+            "Solicite ao suporte AUXSOL a habilitação de acesso por API.",
+            "Autorize as usinas da conta para o aplicativo da GRID.",
+        ),
+        connector_active=False,
+        activation_note="O conector depende da liberação oficial de API pela AUXSOL.",
+    ),
+    CHINT: ProviderProfile(
+        portal_name="CHINT Power / FlexOM",
+        credential_summary="Credencial CPS/FlexOM",
+        key_label="Identificador da API",
+        secret_label="Segredo da API",
+        key_placeholder="Identificador fornecido pela CHINT",
+        secret_placeholder="Segredo fornecido pela CHINT",
+        setup_steps=(
+            "Confirme se a operação usa CHINT Power ou FlexOM/CPS.",
+            "Solicite uma credencial de integração para a conta instaladora.",
+            "Defina quais usinas poderão ser acessadas pelo aplicativo.",
+        ),
+        connector_active=False,
+        activation_note="A CHINT precisa liberar a API correspondente ao portal utilizado.",
+    ),
+    SOFAR: ProviderProfile(
+        portal_name="SofarSolar",
+        credential_summary="Credencial OpenAPI do SofarCloud",
+        key_label="App ID",
+        secret_label="App Secret",
+        key_placeholder="App ID fornecido pela SofarSolar",
+        secret_placeholder="App Secret do aplicativo",
+        setup_steps=(
+            "Confirme o portal e a região onde as usinas Sofar estão cadastradas.",
+            "Solicite à SofarSolar acesso OpenAPI para a conta instaladora.",
+            "Autorize as usinas para o aplicativo da GRID Engenharia.",
+        ),
+        connector_active=False,
+        activation_note="O acesso depende de credenciais OpenAPI fornecidas pela SofarSolar.",
+    ),
+    FRONIUS: ProviderProfile(
+        portal_name="Fronius Solar.web",
+        credential_summary="Solar.web API / autorização da conta",
+        key_label="Client ID",
+        secret_label="Client Secret",
+        key_placeholder="Client ID da Fronius",
+        secret_placeholder="Client Secret do aplicativo",
+        setup_steps=(
+            "Confirme as usinas e permissões da conta Solar.web.",
+            "Solicite acesso de desenvolvedor/API para a integração.",
+            "Autorize as instalações que poderão ser consultadas pela GRID.",
+        ),
+        connector_active=False,
+        activation_note="A Fronius precisa liberar o aplicativo e o acesso às instalações do Solar.web.",
+    ),
 }
+
+PROVIDER_CATALOG = list(PROVIDER_PROFILES)
 
 
 def _validated_base_url(value: str) -> str:

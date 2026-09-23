@@ -7,9 +7,9 @@ from solar_crm.calculations import number_br, percent
 from solar_crm.db import query, query_df
 from solar_crm.monitoring import (
     DEFAULT_URLS,
+    PROVIDER_CATALOG,
     PROVIDER_PROFILES,
     SOLARZ,
-    SUPPORTED_PROVIDERS,
     MonitoringError,
     connect_and_discover,
     discover_remote_plants,
@@ -20,7 +20,7 @@ from solar_crm.monitoring import (
 )
 from solar_crm.ui import date_br, flash, month_label, page_intro, plant_options, render_delete_control, show_flash
 
-page_intro("Use o SolarZ como central principal para importar usinas, geração diária e desempenho mensal diretamente para o sistema.")
+page_intro("Conecte portais de fabricantes, importe usinas e centralize a geração diária no GRID Engenharia.")
 show_flash()
 
 connections = query(
@@ -73,23 +73,25 @@ with accounts_tab:
                 st.badge(f"Passo {step}", color="blue")
                 st.write(label)
 
-    provider_columns = st.columns(len(SUPPORTED_PROVIDERS))
-    for column, provider_name in zip(provider_columns, SUPPORTED_PROVIDERS):
-        profile = PROVIDER_PROFILES[provider_name]
-        with column.container(border=True, height="stretch"):
-            st.subheader(profile.portal_name, icon=":material/cloud:")
-            st.badge("Conector ativo", color="green", icon=":material/check:")
-            st.caption(profile.credential_summary)
+    st.subheader("Portais disponíveis", icon=":material/apps:")
+    for start in range(0, len(PROVIDER_CATALOG), 3):
+        provider_columns = st.columns(3)
+        for column, provider_name in zip(provider_columns, PROVIDER_CATALOG[start:start + 3]):
+            profile = PROVIDER_PROFILES[provider_name]
+            with column.container(border=True, height="stretch"):
+                st.subheader(profile.portal_name, icon=":material/cloud:")
+                if profile.connector_active:
+                    st.badge("Conector ativo", color="green", icon=":material/check:")
+                else:
+                    st.badge("Credenciamento necessário", color="orange", icon=":material/pending:")
+                st.caption(profile.credential_summary)
 
     st.subheader("Nova conexão", icon=":material/add_link:")
-    provider = st.segmented_control(
+    provider = st.selectbox(
         "Portal ou fabricante",
-        SUPPORTED_PROVIDERS,
-        default=SUPPORTED_PROVIDERS[0],
-        required=True,
+        PROVIDER_CATALOG,
         key="new_integration_provider",
-        width="stretch",
-        wrap=True,
+        format_func=lambda option: PROVIDER_PROFILES[option].portal_name,
     )
     profile = PROVIDER_PROFILES[provider]
 
@@ -110,65 +112,76 @@ with accounts_tab:
         )
 
     with form_column.container(border=True, height="stretch"):
-        st.subheader(f"Conectar {profile.portal_name}", icon=":material/login:")
-        with st.form(f"new_integration_{provider}"):
-            connection_name = st.text_input(
-                "Nome desta conexão",
-                placeholder=f"Ex.: {profile.portal_name} principal",
-                help="Use um nome fácil de reconhecer caso tenha mais de uma conta no mesmo portal.",
-            )
-            api_id = ""
-            if profile.key_label:
-                api_id = st.text_input(
-                    profile.key_label,
-                    placeholder=profile.key_placeholder,
+        if profile.connector_active:
+            st.subheader(f"Conectar {profile.portal_name}", icon=":material/login:")
+            with st.form(f"new_integration_{provider}"):
+                connection_name = st.text_input(
+                    "Nome desta conexão",
+                    placeholder=f"Ex.: {profile.portal_name} principal",
+                    help="Use um nome fácil de reconhecer caso tenha mais de uma conta no mesmo portal.",
                 )
-            secret = st.text_input(
-                profile.secret_label,
-                type="password",
-                placeholder=profile.secret_placeholder,
-                help="A credencial será criptografada e nunca aparecerá nos relatórios.",
-            )
-            with st.expander("Configuração avançada", icon=":material/tune:"):
-                base_url = st.text_input("Endereço oficial da API", value=DEFAULT_URLS[provider])
-                interval = st.number_input(
-                    "Intervalo planejado de sincronização (minutos)",
-                    min_value=15,
-                    value=60,
-                    step=15,
+                api_id = ""
+                if profile.key_label:
+                    api_id = st.text_input(
+                        profile.key_label,
+                        placeholder=profile.key_placeholder,
+                    )
+                secret = st.text_input(
+                    profile.secret_label,
+                    type="password",
+                    placeholder=profile.secret_placeholder,
+                    help="A credencial será criptografada e nunca aparecerá nos relatórios.",
                 )
-            submitted = st.form_submit_button(
-                "Conectar, validar e importar usinas",
-                type="primary",
-                icon=":material/cloud_sync:",
+                with st.expander("Configuração avançada", icon=":material/tune:"):
+                    base_url = st.text_input("Endereço oficial da API", value=DEFAULT_URLS[provider])
+                    interval = st.number_input(
+                        "Intervalo planejado de sincronização (minutos)",
+                        min_value=15,
+                        value=60,
+                        step=15,
+                    )
+                submitted = st.form_submit_button(
+                    "Conectar, validar e importar usinas",
+                    type="primary",
+                    icon=":material/cloud_sync:",
+                )
+            if submitted:
+                try:
+                    with st.status("Validando a credencial no portal...", expanded=True) as status:
+                        st.write("Conferindo o endereço oficial da API")
+                        st.write("Autenticando sem salvar a credencial")
+                        _, found = connect_and_discover(
+                            connection_name,
+                            provider,
+                            base_url,
+                            api_id,
+                            secret,
+                            int(interval),
+                        )
+                        st.write(f"Importando {len(found)} usina(s) disponível(is) para esta conta")
+                        status.update(label="Portal conectado com sucesso", state="complete", expanded=False)
+                    if found:
+                        flash(f"Conexão validada e {len(found)} usina(s) importada(s).")
+                    else:
+                        flash(
+                            "A conexão foi validada, mas o portal não liberou usinas para esta credencial. "
+                            "Confira as permissões da conta.",
+                            kind="warning",
+                        )
+                    st.rerun()
+                except MonitoringError as exc:
+                    st.error(str(exc), icon=":material/error:")
+                    st.caption("Nada foi salvo. Corrija a credencial ou a permissão indicada e tente novamente.")
+        else:
+            st.subheader(f"Preparar {profile.portal_name}", icon=":material/pending_actions:")
+            st.warning(profile.activation_note, icon=":material/admin_panel_settings:")
+            st.write(
+                "O GRID já mostra o portal e o procedimento correto. O botão de login será liberado quando o "
+                "fabricante emitir e aprovar as credenciais do aplicativo da GRID Engenharia."
             )
-        if submitted:
-            try:
-                with st.status("Validando a credencial no portal...", expanded=True) as status:
-                    st.write("Conferindo o endereço oficial da API")
-                    st.write("Autenticando sem salvar a credencial")
-                    _, found = connect_and_discover(
-                        connection_name,
-                        provider,
-                        base_url,
-                        api_id,
-                        secret,
-                        int(interval),
-                    )
-                    st.write(f"Importando {len(found)} usina(s) disponível(is) para esta conta")
-                    status.update(label="Portal conectado com sucesso", state="complete", expanded=False)
-                if found:
-                    flash(f"Conexão validada e {len(found)} usina(s) importada(s).")
-                else:
-                    flash(
-                        "A conexão foi validada, mas o portal não liberou usinas para esta credencial. "
-                        "Confira as permissões da conta.",
-                        kind="warning",
-                    )
-                st.rerun()
-            except MonitoringError as exc:
-                st.error(str(exc), icon=":material/error:")
-                st.caption("Nada foi salvo. Corrija a credencial ou a permissão indicada e tente novamente.")
+            st.caption(
+                "Isso evita pedir sua senha comum, tentar acessar uma API privada ou exibir uma conexão que não funciona."
+            )
 
     if connections:
         st.subheader("Portais conectados", icon=":material/cloud_done:")
