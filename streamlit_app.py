@@ -1,9 +1,23 @@
+import importlib
+
 import streamlit as st
+
+from solar_crm import db as db_module
+
+# Streamlit can hot-reload the entrypoint while keeping imported modules alive.
+# Reload an older database module before running a newly deployed migration.
+if int(getattr(db_module, "SCHEMA_VERSION", 0)) < 17:
+    db_module = importlib.reload(db_module)
 
 from solar_crm.auth import render_user_sidebar, require_login
 from solar_crm.branding import configured_app_name, configured_logo
 from solar_crm.config import seed_demo_data
-from solar_crm.db import SCHEMA_VERSION, database_cache_key, init_db, query_one, using_postgres
+
+SCHEMA_VERSION = db_module.SCHEMA_VERSION
+database_cache_key = db_module.database_cache_key
+init_db = db_module.init_db
+query_one = db_module.query_one
+using_postgres = db_module.using_postgres
 
 st.set_page_config(
     page_title="GRID Engenharia",
