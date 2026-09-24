@@ -2,8 +2,10 @@ import streamlit as st
 
 from solar_crm.auth import ROLES, list_app_users, require_role, save_app_user
 from solar_crm.branding import configured_app_name, configured_logo, normalize_brand_logo
-from solar_crm.db import clear_business_data, execute, get_db_path, query_one, using_postgres
+from solar_crm.db import clear_business_data, execute, get_db_path, now_iso, query_one, using_postgres
 from solar_crm.document_cache import clear_document_caches
+from solar_crm.notification_delivery import delivery_configuration, dispatch_pending_notifications
+from solar_crm.notifications import SEVERITIES
 from solar_crm.signature import normalize_signature_image
 from solar_crm.sharing import resolve_share_base_url
 from solar_crm.ui import flash, page_intro, show_flash
@@ -163,6 +165,100 @@ with right:
                         st.error(str(exc))
 
     with st.container(border=True):
+        st.subheader("Envios automáticos", icon=":material/send:")
+        delivery_config = delivery_configuration()
+        if delivery_config["whatsapp"]:
+            st.success("WhatsApp Cloud API configurada", icon=":material/chat:")
+        else:
+            st.warning("WhatsApp ainda sem credenciais", icon=":material/chat:")
+        if delivery_config["email"]:
+            st.success("Servidor de e-mail configurado", icon=":material/mail:")
+        else:
+            st.warning("E-mail ainda sem credenciais SMTP", icon=":material/mail:")
+
+        categories_available = ["Financeiro", "Operação", "Preventiva", "Leitura", "Garantia", "Falha", "Estoque", "Comercial", "Geral"]
+        saved_categories = [
+            item.strip() for item in str(settings.get("notifications_categories") or "").split(",") if item.strip()
+        ]
+        with st.form("automatic_delivery_settings"):
+            automatic_enabled = st.toggle(
+                "Ativar disparos automáticos",
+                value=bool(settings.get("notifications_auto_enabled")),
+                help="Somente alertas criados depois da ativação poderão ser enviados.",
+            )
+            whatsapp_enabled = st.checkbox(
+                "Enviar por WhatsApp",
+                value=bool(settings.get("notifications_whatsapp_enabled")) and delivery_config["whatsapp"],
+                disabled=not delivery_config["whatsapp"],
+            )
+            email_enabled = st.checkbox(
+                "Enviar por e-mail",
+                value=bool(settings.get("notifications_email_enabled")) and delivery_config["email"],
+                disabled=not delivery_config["email"],
+            )
+            automatic_categories = st.multiselect(
+                "Categorias autorizadas",
+                categories_available,
+                default=[item for item in saved_categories if item in categories_available],
+            )
+            saved_severity = settings.get("notifications_min_severity") or "Média"
+            minimum_severity = st.selectbox(
+                "Prioridade mínima",
+                SEVERITIES,
+                index=SEVERITIES.index(saved_severity) if saved_severity in SEVERITIES else 1,
+            )
+            if st.form_submit_button("Salvar automação", type="primary", icon=":material/save:"):
+                if automatic_enabled and not (whatsapp_enabled or email_enabled):
+                    st.error("Configure e selecione pelo menos um canal antes de ativar os disparos.")
+                elif automatic_enabled and not automatic_categories:
+                    st.error("Selecione pelo menos uma categoria autorizada.")
+                else:
+                    was_enabled = bool(settings.get("notifications_auto_enabled"))
+                    started_at = settings.get("notifications_delivery_started_at")
+                    if automatic_enabled and not was_enabled:
+                        started_at = now_iso()
+                    execute(
+                        """UPDATE settings SET notifications_auto_enabled=?,
+                           notifications_whatsapp_enabled=?, notifications_email_enabled=?,
+                           notifications_categories=?, notifications_min_severity=?,
+                           notifications_delivery_started_at=? WHERE id=1""",
+                        (
+                            int(automatic_enabled), int(whatsapp_enabled), int(email_enabled),
+                            ",".join(automatic_categories), minimum_severity, started_at,
+                        ),
+                    )
+                    flash("Configuração de envios automáticos salva.")
+                    st.rerun()
+
+        if settings.get("notifications_auto_enabled"):
+            if st.button("Processar envios pendentes agora", icon=":material/outgoing_mail:"):
+                result = dispatch_pending_notifications()
+                if result["errors"]:
+                    st.warning(f"{result['sent']} envio(s) concluído(s) e {result['errors']} com erro.")
+                else:
+                    st.success(f"{result['sent']} envio(s) concluído(s).")
+
+        with st.expander("Como configurar os Secrets", icon=":material/key:"):
+            st.code(
+                '''[whatsapp]
+whatsapp_access_token = "TOKEN_META"
+whatsapp_phone_number_id = "ID_DO_NUMERO"
+whatsapp_template_name = "grid_alerta"
+whatsapp_template_language = "pt_BR"
+
+[email]
+smtp_host = "smtp.seuprovedor.com"
+smtp_port = 587
+smtp_username = "usuario"
+smtp_password = "senha"
+smtp_from_email = "contato@suaempresa.com.br"
+smtp_from_name = "GRID Engenharia"
+smtp_security = "starttls"''',
+                language="toml",
+            )
+            st.caption("Para mensagens iniciadas pela empresa no WhatsApp, use um modelo aprovado pela Meta com três variáveis: nome, título e mensagem.")
+
+    with st.container(border=True):
         st.subheader("Banco de dados", icon=":material/database:")
         if using_postgres():
             st.success("PostgreSQL em nuvem conectado", icon=":material/cloud_done:")
@@ -203,7 +299,7 @@ with right:
         - Login individual por e-mail e senha
         - PostgreSQL em nuvem com migração do banco local
         """)
-        st.caption("Próximas integrações possíveis: leitura automática de faturas e envio por WhatsApp/e-mail.")
+        st.caption("Os envios por WhatsApp/e-mail podem ser ativados nesta página após cadastrar as credenciais nos Secrets.")
 
     with st.expander("Preparar base para uso real", icon=":material/delete_sweep:"):
         st.warning("Esta ação remove clientes, usinas, leituras, contratos, cobranças, atividades e ocorrências. As configurações da empresa serão preservadas.")

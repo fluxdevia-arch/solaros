@@ -7,7 +7,7 @@ from solar_crm import db as db_module
 
 # Streamlit can hot-reload the entrypoint while keeping imported modules alive.
 # Reload an older database module before running a newly deployed migration.
-if int(getattr(db_module, "SCHEMA_VERSION", 0)) < 21:
+if int(getattr(db_module, "SCHEMA_VERSION", 0)) < 22:
     db_module = importlib.reload(db_module)
 
 from solar_crm import auth as auth_module
@@ -93,11 +93,13 @@ if field_inspection_mode:
 
 notification_count = 0
 try:
+    from solar_crm.notification_delivery import dispatch_pending_notifications
     from solar_crm.notifications import notification_counts, refresh_automatic_notifications
 
     last_refresh = st.session_state.get("notifications_refreshed_at")
     if not isinstance(last_refresh, datetime) or datetime.now() - last_refresh >= timedelta(minutes=5):
         refresh_automatic_notifications()
+        dispatch_pending_notifications()
         st.session_state["notifications_refreshed_at"] = datetime.now()
     notification_count = notification_counts(role=app_user.get("role") or "Administrador")["new"]
 except Exception:

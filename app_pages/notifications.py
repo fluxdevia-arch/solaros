@@ -4,6 +4,11 @@ import pandas as pd
 import streamlit as st
 
 from solar_crm.db import query
+from solar_crm.notification_delivery import (
+    delivery_configuration,
+    notification_deliveries,
+    send_notification_channel,
+)
 from solar_crm.notifications import (
     AUDIENCES,
     SEVERITIES,
@@ -21,6 +26,7 @@ page_intro("Acompanhe vencimentos, preventivas, atividades, garantias, falhas e 
 show_flash()
 
 role = st.session_state.get("app_user", {}).get("role", "Administrador")
+delivery_config = delivery_configuration()
 refresh_automatic_notifications()
 counts = notification_counts(role)
 
@@ -94,6 +100,8 @@ else:
     }
     for item in filtered:
         with st.container(border=True):
+            deliveries = notification_deliveries(item["id"])
+            deliveries_by_channel = {row["channel"]: row for row in deliveries}
             st.subheader(item["title"], icon=severity_icons.get(item["severity"], ":material/notifications:"))
             st.caption(
                 f"{item['severity']} · {item['category']} · {item['origin']}"
@@ -113,9 +121,40 @@ else:
                     st.rerun()
                 whats_url = whatsapp_url(item)
                 if whats_url:
-                    st.link_button("Enviar no WhatsApp", whats_url, icon=":material/chat:")
+                    st.link_button("Abrir WhatsApp", whats_url, icon=":material/chat:")
+                if delivery_config["whatsapp"] and item.get("recipient_phone"):
+                    whatsapp_delivery = deliveries_by_channel.get("WhatsApp")
+                    whatsapp_label = "Reenviar WhatsApp" if whatsapp_delivery and whatsapp_delivery["status"] == "Erro" else "Enviar WhatsApp pela API"
+                    if not whatsapp_delivery or whatsapp_delivery["status"] != "Enviada":
+                        if st.button(whatsapp_label, key=f"send_whatsapp_{item['id']}", icon=":material/send:"):
+                            delivery = send_notification_channel(
+                                item["id"], "WhatsApp", retry=bool(whatsapp_delivery and whatsapp_delivery["status"] == "Erro")
+                            )
+                            if delivery["status"] == "Enviada":
+                                st.success("Mensagem enviada pelo WhatsApp.")
+                            else:
+                                st.error(f"Falha no WhatsApp: {delivery['last_error']}")
+                            st.rerun()
+                if delivery_config["email"] and item.get("recipient_email"):
+                    email_delivery = deliveries_by_channel.get("E-mail")
+                    email_label = "Reenviar e-mail" if email_delivery and email_delivery["status"] == "Erro" else "Enviar e-mail"
+                    if not email_delivery or email_delivery["status"] != "Enviada":
+                        if st.button(email_label, key=f"send_email_{item['id']}", icon=":material/mail:"):
+                            delivery = send_notification_channel(
+                                item["id"], "E-mail", retry=bool(email_delivery and email_delivery["status"] == "Erro")
+                            )
+                            if delivery["status"] == "Enviada":
+                                st.success("E-mail enviado.")
+                            else:
+                                st.error(f"Falha no e-mail: {delivery['last_error']}")
+                            st.rerun()
             if item.get("recipient_email"):
                 st.caption(f"E-mail do destinatário: {item['recipient_email']}")
+            if deliveries:
+                delivery_text = " · ".join(
+                    f"{row['channel']}: {row['status']}" for row in deliveries
+                )
+                st.caption(f"Envios: {delivery_text}")
 
 history = notifications_for_role(role, include_archived=True)
 history = [row for row in history if row["status"] in {"Arquivada", "Resolvida"}]

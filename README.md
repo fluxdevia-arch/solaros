@@ -26,7 +26,7 @@ Sistema profissional para estruturar o pós-venda e o pré-dimensionamento de pr
 - Dashboard com estimativa regional de geração e economia quando a leitura real do mês ainda não foi lançada.
 - Perfis de acesso por usuário: Administrador, Técnico, Financeiro e Comercial, com menus compatíveis com cada função.
 - Aceite digital do cliente nas ordens de serviço e vistorias, com assinatura, documento e data/hora registrados no PDF.
-- Central de notificações para cobranças, atividades, O.S., preventivas, garantias, falhas, estoque e leituras pendentes, com atalho para WhatsApp.
+- Central de notificações para cobranças, atividades, O.S., preventivas, garantias, falhas, estoque e leituras pendentes, com envio manual ou automático por WhatsApp Cloud API e e-mail SMTP, histórico e proteção contra duplicidade.
 - Relatório fotográfico de vistoria em PDF com identidade visual configurável, resultados destacados e assinatura técnica padronizada.
 - Gerador de contratos para pós-venda, manutenção, consultoria e projetos, com histórico e PDF.
 - Cálculo de cobertura, desempenho, disponibilidade e economia estimada.
@@ -107,6 +107,15 @@ Para executar a sincronização por agendador do Windows, configure uma tarefa q
 Em **Configurações**, informe a URL usada pela equipe para acessar o SolarOS. Em rede local, use o IP do computador servidor, por exemplo `http://192.168.0.20:8501`. Se o sistema estiver hospedado, use a URL HTTPS pública.
 
 Cada O.S. recebe um código aleatório. O link abre uma visualização de campo sem a navegação administrativa e permite registrar o andamento e a conclusão. O botão **Gerar novo link** invalida imediatamente o endereço anterior.
+
+## Notificações por WhatsApp e e-mail
+
+O sistema mantém todos os alertas na central interna. O administrador pode ativar os disparos externos em **Configurações > Envios automáticos**, escolhendo canais, categorias e prioridade mínima. Somente notificações criadas depois da ativação entram no envio automático; cada tentativa, sucesso e erro fica registrado para evitar mensagens duplicadas.
+
+- WhatsApp usa a API oficial WhatsApp Business Cloud da Meta. Mensagens iniciadas pela empresa devem usar um template previamente aprovado com as variáveis nome, título e mensagem.
+- E-mail usa SMTP com SSL ou STARTTLS.
+- Tokens e senhas ficam apenas nos Secrets do Streamlit. Use `.streamlit/secrets.toml.example` como modelo e nunca publique os valores reais.
+- Sem credenciais, o botão **Abrir WhatsApp** continua disponível com a mensagem pronta para envio manual.
 
 ## Vistorias em celular e tablet
 

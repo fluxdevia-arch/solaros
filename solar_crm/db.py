@@ -14,7 +14,7 @@ import pandas as pd
 from solar_crm.config import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 _POSTGRES_POOL = None
 _POSTGRES_POOL_URL = ""
@@ -162,7 +162,13 @@ CREATE TABLE IF NOT EXISTS settings (
     technical_registration TEXT,
     signature_image BLOB,
     signature_image_mime TEXT,
-    share_base_url TEXT DEFAULT 'http://localhost:8501'
+    share_base_url TEXT DEFAULT 'http://localhost:8501',
+    notifications_auto_enabled INTEGER NOT NULL DEFAULT 0,
+    notifications_whatsapp_enabled INTEGER NOT NULL DEFAULT 0,
+    notifications_email_enabled INTEGER NOT NULL DEFAULT 0,
+    notifications_categories TEXT NOT NULL DEFAULT 'Financeiro,Preventiva,Garantia,Leitura',
+    notifications_min_severity TEXT NOT NULL DEFAULT 'Média',
+    notifications_delivery_started_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS app_users (
@@ -233,6 +239,21 @@ CREATE TABLE IF NOT EXISTS notification_events (
     archived_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    notification_id INTEGER NOT NULL REFERENCES notification_events(id) ON DELETE CASCADE,
+    channel TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Pendente',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    provider_message_id TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sent_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(notification_id, channel)
 );
 
 CREATE TABLE IF NOT EXISTS contracts (
@@ -956,6 +977,7 @@ CREATE INDEX IF NOT EXISTS idx_service_orders_token ON service_orders(public_tok
 CREATE INDEX IF NOT EXISTS idx_app_users_role ON app_users(active, role);
 CREATE INDEX IF NOT EXISTS idx_notifications_status ON notification_events(status, severity, due_date);
 CREATE INDEX IF NOT EXISTS idx_notifications_audience ON notification_events(audience, status);
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_status ON notification_deliveries(status, channel);
 CREATE INDEX IF NOT EXISTS idx_fault_catalog_lookup ON fault_catalog(manufacturer, symptom_category, active);
 CREATE INDEX IF NOT EXISTS idx_fault_cases_status ON fault_cases(status, observed_at);
 CREATE INDEX IF NOT EXISTS idx_fault_cases_plant ON fault_cases(plant_id, status);
@@ -1084,6 +1106,12 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
             "signature_image": "BYTEA",
             "signature_image_mime": "TEXT",
             "share_base_url": "TEXT DEFAULT 'http://localhost:8501'",
+            "notifications_auto_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "notifications_whatsapp_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "notifications_email_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "notifications_categories": "TEXT NOT NULL DEFAULT 'Financeiro,Preventiva,Garantia,Leitura'",
+            "notifications_min_severity": "TEXT NOT NULL DEFAULT 'Média'",
+            "notifications_delivery_started_at": "TEXT",
         }
         for name, column_type in additions.items():
             conn.execute(f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {name} {column_type}")
@@ -1131,6 +1159,12 @@ def _ensure_schema_columns(conn: sqlite3.Connection | PostgresConnection) -> Non
         "signature_image": "BLOB",
         "signature_image_mime": "TEXT",
         "share_base_url": "TEXT DEFAULT 'http://localhost:8501'",
+        "notifications_auto_enabled": "INTEGER NOT NULL DEFAULT 0",
+        "notifications_whatsapp_enabled": "INTEGER NOT NULL DEFAULT 0",
+        "notifications_email_enabled": "INTEGER NOT NULL DEFAULT 0",
+        "notifications_categories": "TEXT NOT NULL DEFAULT 'Financeiro,Preventiva,Garantia,Leitura'",
+        "notifications_min_severity": "TEXT NOT NULL DEFAULT 'Média'",
+        "notifications_delivery_started_at": "TEXT",
     }
     for name, column_type in additions.items():
         if name not in columns:
@@ -1850,6 +1884,7 @@ def clear_business_data() -> None:
     """Remove demo/operational records while preserving company settings."""
     conn = connect()
     try:
+        conn.execute("DELETE FROM notification_deliveries")
         conn.execute("DELETE FROM notification_events")
         conn.execute("DELETE FROM stock_movements")
         conn.execute("DELETE FROM stock_items")
