@@ -93,13 +93,18 @@ if field_inspection_mode:
 
 notification_count = 0
 try:
-    from solar_crm.notification_delivery import dispatch_pending_notifications
+    from solar_crm import notification_delivery as delivery_module
     from solar_crm.notifications import notification_counts, refresh_automatic_notifications
+
+    # Hosted Streamlit can keep the previous delivery module cached during a deploy.
+    if not hasattr(delivery_module, "schedule_notification_dispatch"):
+        delivery_module = importlib.reload(delivery_module)
+    schedule_notification_dispatch = delivery_module.schedule_notification_dispatch
 
     last_refresh = st.session_state.get("notifications_refreshed_at")
     if not isinstance(last_refresh, datetime) or datetime.now() - last_refresh >= timedelta(minutes=5):
         refresh_automatic_notifications()
-        dispatch_pending_notifications()
+        schedule_notification_dispatch()
         st.session_state["notifications_refreshed_at"] = datetime.now()
     notification_count = notification_counts(role=app_user.get("role") or "Administrador")["new"]
 except Exception:

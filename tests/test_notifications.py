@@ -17,6 +17,7 @@ from solar_crm.notifications import (
 from solar_crm.notification_delivery import (
     delivery_configuration,
     dispatch_pending_notifications,
+    email_config,
     notification_deliveries,
     send_notification_channel,
 )
@@ -86,6 +87,15 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(query_one("SELECT status FROM notification_events WHERE event_key=?", (f"cash:{cash_id}",))["status"], "Resolvida")
         self.assertEqual(query_one("SELECT status FROM notification_events WHERE event_key=?", (f"task:{task_id}",))["status"], "Resolvida")
 
+    def test_monthly_reading_deadline_is_the_fifth_day(self):
+        refresh_automatic_notifications(date(2026, 9, 2))
+        notice = query_one(
+            "SELECT * FROM notification_events WHERE event_key=?",
+            (f"reading:{self.plant_id}:2026-09-01",),
+        )
+        self.assertEqual(notice["due_date"], "2026-09-05")
+        self.assertEqual(notice["severity"], "Média")
+
     def test_manual_notification_respects_audience_and_status(self):
         notification_id = create_manual_notification({
             "title": "Cobrança revisada",
@@ -127,7 +137,12 @@ class NotificationTests(unittest.TestCase):
         execute(
             """UPDATE settings SET notifications_auto_enabled=1,
                notifications_whatsapp_enabled=1, notifications_email_enabled=0,
-               notifications_categories='Financeiro', notifications_min_severity='Média' WHERE id=1"""
+               notifications_categories='Financeiro', notifications_min_severity='Média',
+               notifications_delivery_started_at='2026-09-23T10:00:00' WHERE id=1"""
+        )
+        execute(
+            "UPDATE notification_events SET created_at='2026-09-23 10:01:00' WHERE id=?",
+            (notification_id,),
         )
 
         self.assertTrue(delivery_configuration()["whatsapp"])
@@ -162,6 +177,10 @@ class NotificationTests(unittest.TestCase):
         smtp_class.assert_called_once()
         smtp_class.return_value.starttls.assert_called_once()
         smtp_class.return_value.send_message.assert_called_once()
+
+    def test_invalid_smtp_port_falls_back_without_crashing_settings(self):
+        os.environ["SMTP_PORT"] = "porta-invalida"
+        self.assertEqual(email_config()["port"], 587)
 
 
 if __name__ == "__main__":

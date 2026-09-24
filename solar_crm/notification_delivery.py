@@ -3,7 +3,10 @@ from __future__ import annotations
 import re
 import smtplib
 import ssl
+from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime, timedelta
 from email.message import EmailMessage
+from threading import Lock
 from typing import Any
 
 import requests
@@ -14,6 +17,9 @@ from solar_crm.db import connect, now_iso, query, query_one
 
 SEVERITY_ORDER = {"Baixa": 0, "Média": 1, "Alta": 2, "Crítica": 3}
 DELIVERY_CHANNELS = ("WhatsApp", "E-mail")
+_DISPATCH_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="notification-delivery")
+_DISPATCH_LOCK = Lock()
+_DISPATCH_FUTURE: Future | None = None
 
 
 def _phone(value: object) -> str:
@@ -34,14 +40,22 @@ def whatsapp_config() -> dict[str, Any]:
 
 
 def email_config() -> dict[str, Any]:
+    raw_port = setting("SMTP_PORT", section="email", default=587)
+    try:
+        port = int(raw_port or 587)
+    except (TypeError, ValueError):
+        port = 587
+    security = str(setting("SMTP_SECURITY", section="email", default="starttls") or "starttls").strip().lower()
+    if security not in {"ssl", "tls", "starttls", "none"}:
+        security = "starttls"
     return {
         "host": str(setting("SMTP_HOST", section="email", default="") or "").strip(),
-        "port": int(setting("SMTP_PORT", section="email", default=587) or 587),
+        "port": port,
         "username": str(setting("SMTP_USERNAME", section="email", default="") or "").strip(),
         "password": str(setting("SMTP_PASSWORD", section="email", default="") or ""),
         "from_email": str(setting("SMTP_FROM_EMAIL", section="email", default="") or "").strip(),
         "from_name": str(setting("SMTP_FROM_NAME", section="email", default="GRID Engenharia") or "GRID Engenharia").strip(),
-        "security": str(setting("SMTP_SECURITY", section="email", default="starttls") or "starttls").strip().lower(),
+        "security": security,
     }
 
 
@@ -59,8 +73,8 @@ def format_notification_message(notification: dict) -> str:
     return f"Olá, {recipient}. {notification['title']}: {notification['message']}"
 
 
-def _send_whatsapp(notification: dict) -> str:
-    config = whatsapp_config()
+def _send_whatsapp(notification: dict, config: dict[str, Any] | None = None) -> str:
+    config = config or whatsapp_config()
     if not (config["access_token"] and config["phone_number_id"]):
         raise ValueError("Configure WHATSAPP_ACCESS_TOKEN e WHATSAPP_PHONE_NUMBER_ID nos Secrets.")
     recipient = _phone(notification.get("recipient_phone"))
@@ -100,8 +114,8 @@ def _send_whatsapp(notification: dict) -> str:
     return str(messages[0].get("id") if messages else "enviado")
 
 
-def _send_email(notification: dict) -> str:
-    config = email_config()
+def _send_email(notification: dict, config: dict[str, Any] | None = None) -> str:
+    config = config or email_config()
     recipient = str(notification.get("recipient_email") or "").strip()
     if not recipient:
         raise ValueError("O cliente não possui um e-mail válido.")
@@ -168,12 +182,13 @@ def _claim_delivery(notification_id: int, channel: str, recipient: str, *, retry
         claimed = bool(getattr(cursor, "rowcount", 0))
         if not claimed:
             existing = conn.execute(
-                "SELECT status, attempts FROM notification_deliveries WHERE notification_id=? AND channel=?",
+                "SELECT status, attempts, updated_at FROM notification_deliveries WHERE notification_id=? AND channel=?",
                 (notification_id, channel),
             ).fetchone()
             if existing:
                 current_status = existing["status"] if isinstance(existing, dict) else existing[0]
                 attempts = int(existing["attempts"] if isinstance(existing, dict) else existing[1])
+                updated_at = existing["updated_at"] if isinstance(existing, dict) else existing[2]
                 if current_status == "Erro" and (retry or attempts < 3):
                     updated = conn.execute(
                         """UPDATE notification_deliveries SET status='Enviando', recipient=?, updated_at=?
@@ -181,6 +196,21 @@ def _claim_delivery(notification_id: int, channel: str, recipient: str, *, retry
                         (recipient or "não informado", now, notification_id, channel),
                     )
                     claimed = bool(getattr(updated, "rowcount", 0))
+                elif current_status == "Enviando":
+                    try:
+                        updated_moment = datetime.fromisoformat(
+                            str(updated_at).replace("Z", "+00:00")
+                        ).replace(tzinfo=None)
+                        stale = updated_moment < datetime.now() - timedelta(minutes=10)
+                    except (TypeError, ValueError):
+                        stale = True
+                    if stale:
+                        updated = conn.execute(
+                            """UPDATE notification_deliveries SET status='Enviando', recipient=?, updated_at=?
+                               WHERE notification_id=? AND channel=? AND status='Enviando' AND updated_at=?""",
+                            (recipient or "não informado", now, notification_id, channel, updated_at),
+                        )
+                        claimed = bool(getattr(updated, "rowcount", 0))
                 elif current_status == "Enviada" and retry:
                     updated = conn.execute(
                         """UPDATE notification_deliveries SET status='Enviando', recipient=?, updated_at=?
@@ -194,7 +224,13 @@ def _claim_delivery(notification_id: int, channel: str, recipient: str, *, retry
         conn.close()
 
 
-def send_notification_channel(notification_id: int, channel: str, *, retry: bool = False) -> dict:
+def send_notification_channel(
+    notification_id: int,
+    channel: str,
+    *,
+    retry: bool = False,
+    delivery_configs: dict[str, dict[str, Any]] | None = None,
+) -> dict:
     if channel not in DELIVERY_CHANNELS:
         raise ValueError("Canal de envio inválido.")
     notification = query_one(
@@ -218,7 +254,12 @@ def send_notification_channel(notification_id: int, channel: str, *, retry: bool
             (notification_id, channel),
         )
     try:
-        provider_id = _send_whatsapp(notification) if channel == "WhatsApp" else _send_email(notification)
+        channel_config = (delivery_configs or {}).get(channel)
+        provider_id = (
+            _send_whatsapp(notification, channel_config)
+            if channel == "WhatsApp"
+            else _send_email(notification, channel_config)
+        )
         _save_delivery(notification_id, channel, recipient, "Enviada", provider_message_id=provider_id)
     except Exception as exc:
         error = str(exc)[:1000]
@@ -236,7 +277,11 @@ def notification_deliveries(notification_id: int) -> list[dict]:
     )
 
 
-def dispatch_pending_notifications(limit: int = 20) -> dict[str, int]:
+def dispatch_pending_notifications(
+    limit: int = 20,
+    *,
+    delivery_configs: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, int]:
     settings_row = query_one("SELECT * FROM settings WHERE id=1") or {}
     result = {"sent": 0, "errors": 0, "skipped": 0}
     if not as_bool(settings_row.get("notifications_auto_enabled")):
@@ -257,8 +302,8 @@ def dispatch_pending_notifications(limit: int = 20) -> dict[str, int]:
     started_at = settings_row.get("notifications_delivery_started_at")
     rows = query(
         """SELECT * FROM notification_events
-           WHERE status IN ('Nova','Lida') AND recipient_name IS NOT NULL
-             AND (? IS NULL OR created_at>=?)
+           WHERE status IN ('Nova','Lida')
+             AND (? IS NULL OR REPLACE(created_at, ' ', 'T')>=REPLACE(?, ' ', 'T'))
            ORDER BY created_at LIMIT ?""",
         (started_at, started_at, max(1, min(int(limit), 100))),
     )
@@ -280,9 +325,29 @@ def dispatch_pending_notifications(limit: int = 20) -> dict[str, int]:
             if previous and previous["status"] == "Enviada":
                 result["skipped"] += 1
                 continue
-            delivery = send_notification_channel(notification["id"], channel)
+            delivery = send_notification_channel(
+                notification["id"], channel, delivery_configs=delivery_configs
+            )
             if delivery["status"] == "Enviada":
                 result["sent"] += 1
             else:
                 result["errors"] += 1
     return result
+
+
+def schedule_notification_dispatch(limit: int = 20) -> bool:
+    """Start delivery in the background without delaying page navigation."""
+    global _DISPATCH_FUTURE
+    settings_row = query_one("SELECT notifications_auto_enabled FROM settings WHERE id=1") or {}
+    if not as_bool(settings_row.get("notifications_auto_enabled")):
+        return False
+    configs = {"WhatsApp": whatsapp_config(), "E-mail": email_config()}
+    with _DISPATCH_LOCK:
+        if _DISPATCH_FUTURE is not None and not _DISPATCH_FUTURE.done():
+            return False
+        _DISPATCH_FUTURE = _DISPATCH_EXECUTOR.submit(
+            dispatch_pending_notifications,
+            limit,
+            delivery_configs=configs,
+        )
+    return True

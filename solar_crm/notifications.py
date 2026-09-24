@@ -198,7 +198,7 @@ def refresh_automatic_notifications(as_of: date | None = None, horizon_days: int
         ))
 
     month = today.replace(day=1).isoformat()
-    reading_due = today.replace(day=min(5, today.day)).isoformat()
+    reading_due = today.replace(day=5).isoformat()
     reading_rows = query(
         """SELECT p.id, p.id AS plant_id, p.client_id, p.name AS plant_name,
                   c.name AS client_name, c.contact_name, c.phone, c.email
