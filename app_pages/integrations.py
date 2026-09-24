@@ -85,7 +85,7 @@ with accounts_tab:
                 else:
                     st.badge("Aguardando fabricante", color="orange", icon=":material/pending:")
                 st.caption(profile.credential_summary)
-                st.caption(f"Autenticação: {profile.authentication_method}")
+                st.caption(f"Autenticação: {getattr(profile, 'authentication_method', 'API oficial')}")
 
     st.subheader("Nova conexão", icon=":material/add_link:")
     provider = st.selectbox(
@@ -107,16 +107,18 @@ with accounts_tab:
                 profile.documentation_url,
                 icon=":material/open_in_new:",
             )
-        if profile.portal_url:
+        portal_url = getattr(profile, "portal_url", "")
+        support_url = getattr(profile, "support_url", "")
+        if portal_url:
             st.link_button(
                 "Abrir portal do fabricante",
-                profile.portal_url,
+                portal_url,
                 icon=":material/login:",
             )
-        if profile.support_url:
+        if support_url:
             st.link_button(
                 "Falar com o suporte oficial",
-                profile.support_url,
+                support_url,
                 icon=":material/support_agent:",
             )
         st.warning(
@@ -188,7 +190,9 @@ with accounts_tab:
         else:
             st.subheader(f"Preparar conexão com {profile.portal_name}", icon=":material/pending_actions:")
             st.warning(profile.activation_note, icon=":material/admin_panel_settings:")
-            st.markdown(f"**Método previsto:** {profile.authentication_method}")
+            authentication_method = getattr(profile, "authentication_method", "Credencial oficial do fabricante")
+            support_request = getattr(profile, "support_request", "")
+            st.markdown(f"**Método previsto:** {authentication_method}")
             st.table(
                 {
                     "Etapa": ["1. Conta do portal", "2. Liberação da integração", "3. Conector GRID"],
@@ -196,9 +200,9 @@ with accounts_tab:
                     "Situação": ["Confirmar acesso", "Solicitar credencial e documentação", "Aguardando dados oficiais"],
                 }
             )
-            if profile.support_request:
+            if support_request:
                 st.write("**Mensagem pronta para enviar ao suporte**")
-                st.code(profile.support_request, language=None, wrap_lines=True)
+                st.code(support_request, language=None, wrap_lines=True)
             st.info(
                 "Quando o fabricante confirmar se a conta usa login, OAuth ou chave de API, o GRID poderá "
                 "exibir exatamente esses campos, testar o acesso e importar as usinas.",
