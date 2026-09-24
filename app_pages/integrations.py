@@ -83,8 +83,9 @@ with accounts_tab:
                 if profile.connector_active:
                     st.badge("Conector ativo", color="green", icon=":material/check:")
                 else:
-                    st.badge("Credenciamento necessário", color="orange", icon=":material/pending:")
+                    st.badge("Aguardando fabricante", color="orange", icon=":material/pending:")
                 st.caption(profile.credential_summary)
+                st.caption(f"Autenticação: {profile.authentication_method}")
 
     st.subheader("Nova conexão", icon=":material/add_link:")
     provider = st.selectbox(
@@ -105,6 +106,18 @@ with accounts_tab:
                 "Abrir orientação do portal",
                 profile.documentation_url,
                 icon=":material/open_in_new:",
+            )
+        if profile.portal_url:
+            st.link_button(
+                "Abrir portal do fabricante",
+                profile.portal_url,
+                icon=":material/login:",
+            )
+        if profile.support_url:
+            st.link_button(
+                "Falar com o suporte oficial",
+                profile.support_url,
+                icon=":material/support_agent:",
             )
         st.warning(
             "A senha comum usada para entrar no site do fabricante geralmente não é uma credencial de API.",
@@ -173,14 +186,27 @@ with accounts_tab:
                     st.error(str(exc), icon=":material/error:")
                     st.caption("Nada foi salvo. Corrija a credencial ou a permissão indicada e tente novamente.")
         else:
-            st.subheader(f"Preparar {profile.portal_name}", icon=":material/pending_actions:")
+            st.subheader(f"Preparar conexão com {profile.portal_name}", icon=":material/pending_actions:")
             st.warning(profile.activation_note, icon=":material/admin_panel_settings:")
-            st.write(
-                "O GRID já mostra o portal e o procedimento correto. O botão de login será liberado quando o "
-                "fabricante emitir e aprovar as credenciais do aplicativo da GRID Engenharia."
+            st.markdown(f"**Método previsto:** {profile.authentication_method}")
+            st.table(
+                {
+                    "Etapa": ["1. Conta do portal", "2. Liberação da integração", "3. Conector GRID"],
+                    "Responsável": ["Sua empresa", "Fabricante", "GRID Engenharia"],
+                    "Situação": ["Confirmar acesso", "Solicitar credencial e documentação", "Aguardando dados oficiais"],
+                }
+            )
+            if profile.support_request:
+                st.write("**Mensagem pronta para enviar ao suporte**")
+                st.code(profile.support_request, language=None, wrap_lines=True)
+            st.info(
+                "Quando o fabricante confirmar se a conta usa login, OAuth ou chave de API, o GRID poderá "
+                "exibir exatamente esses campos, testar o acesso e importar as usinas.",
+                icon=":material/info:",
             )
             st.caption(
-                "Isso evita pedir sua senha comum, tentar acessar uma API privada ou exibir uma conexão que não funciona."
+                "Não envie senha ou chave secreta por mensagem. Ela será informada somente no formulário "
+                "protegido quando o conector estiver ativo."
             )
 
     if connections:

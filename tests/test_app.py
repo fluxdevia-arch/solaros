@@ -100,6 +100,43 @@ class StreamlitSmokeTest(unittest.TestCase):
         self.assertIn("plant_equipment_selector", app.session_state)
         self.assertTrue(any(metric.label == "Inversores" and metric.value == "1" for metric in app.metric))
 
+    def test_all_plant_registration_fields_can_be_edited(self):
+        from solar_crm.db import query_one
+
+        app_path = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        app = AppTest.from_file(app_path, default_timeout=20).run()
+        plant = query_one("SELECT * FROM plants ORDER BY id LIMIT 1")
+        app.session_state["selected_plant_id"] = plant["id"]
+        app.switch_page("app_pages/plants.py").run()
+
+        suffix = plant["id"]
+        app.text_input(key=f"plant_edit_name_{suffix}").set_value("Usina atualizada")
+        app.text_input(key=f"plant_edit_unit_code_{suffix}").set_value("UC-998877")
+        app.text_input(key=f"plant_edit_distributor_{suffix}").set_value("Energisa PB")
+        app.text_input(key=f"plant_edit_address_{suffix}").set_value("Rua da Usina, 100")
+        app.text_input(key=f"plant_edit_connection_type_{suffix}").set_value("Trifásica")
+        app.number_input(key=f"plant_edit_installed_{suffix}").set_value(82.5)
+        app.number_input(key=f"plant_edit_expected_{suffix}").set_value(11000.0)
+        app.text_input(key=f"plant_edit_inverter_{suffix}").set_value("2x inversores de 40 kW")
+        app.text_input(key=f"plant_edit_modules_{suffix}").set_value("150x 550 Wp")
+        app.text_input(key=f"plant_edit_monitoring_{suffix}").set_value("https://portal.exemplo.com")
+        app.text_area(key=f"plant_edit_notes_{suffix}").set_value("Cadastro revisado.")
+        app.button(key=f"plant_edit_submit_{suffix}").click().run()
+
+        self.assertFalse(app.exception)
+        updated = query_one("SELECT * FROM plants WHERE id=?", (plant["id"],))
+        self.assertEqual(updated["name"], "Usina atualizada")
+        self.assertEqual(updated["unit_code"], "UC-998877")
+        self.assertEqual(updated["distributor"], "Energisa PB")
+        self.assertEqual(updated["address"], "Rua da Usina, 100")
+        self.assertEqual(updated["connection_type"], "Trifásica")
+        self.assertEqual(float(updated["installed_kwp"]), 82.5)
+        self.assertEqual(float(updated["expected_monthly_kwh"]), 11000.0)
+        self.assertEqual(updated["inverter"], "2x inversores de 40 kW")
+        self.assertEqual(updated["modules"], "150x 550 Wp")
+        self.assertEqual(updated["monitoring_url"], "https://portal.exemplo.com")
+        self.assertEqual(updated["notes"], "Cadastro revisado.")
+
     def test_all_pages_render_with_an_empty_database(self):
         previous_seed = os.environ.get("SOLAROS_SEED_DEMO")
         os.environ["SOLAROS_SEED_DEMO"] = "false"

@@ -140,16 +140,148 @@ with technical:
     if cleaning_due:
         st.warning("A limpeza desta usina está vencida. Crie ou atualize a atividade na agenda operacional.", icon=":material/cleaning_services:")
 
-    with st.expander("Atualizar dados técnicos", icon=":material/edit:"):
-        with st.form("edit_plant"):
-            status = st.selectbox("Status", ["Operando", "Atenção", "Parada", "Desativada"], index=["Operando", "Atenção", "Parada", "Desativada"].index(plant["status"]) if plant["status"] in ["Operando", "Atenção", "Parada", "Desativada"] else 0)
-            expected_edit = st.number_input("Geração esperada (kWh/mês)", min_value=0.0, value=float(plant["expected_monthly_kwh"] or 0), step=100.0)
-            monitoring = st.text_input("Portal de monitoramento", value=plant["monitoring_url"] or "")
-            next_cleaning_edit = st.date_input("Próxima limpeza", value=date.fromisoformat(plant["next_cleaning_date"]) if plant["next_cleaning_date"] else date.today() + timedelta(days=90))
-            notes_edit = st.text_area("Observações", value=plant["notes"] or "")
-            if st.form_submit_button("Salvar alterações", type="primary", icon=":material/save:"):
-                execute("UPDATE plants SET status=?, expected_monthly_kwh=?, monitoring_url=?, next_cleaning_date=?, notes=? WHERE id=?", (status, expected_edit, monitoring, next_cleaning_edit.isoformat(), notes_edit, plant_id))
-                flash("Usina atualizada.")
+    with st.expander("Editar todos os dados da usina", icon=":material/edit:"):
+        c_map = client_options(clients)
+        current_client = next(
+            (label for label, client_id in c_map.items() if client_id == plant["client_id"]),
+            list(c_map)[0],
+        )
+        statuses = ["Operando", "Atenção", "Parada", "Desativada"]
+        with st.form(f"edit_plant_{plant_id}"):
+            st.subheader("Identificação", icon=":material/badge:")
+            identity_left, identity_right = st.columns(2)
+            with identity_left:
+                client_edit = st.selectbox(
+                    "Cliente responsável",
+                    list(c_map),
+                    index=list(c_map).index(current_client),
+                    key=f"plant_edit_client_{plant_id}",
+                )
+                name_edit = st.text_input(
+                    "Nome da usina",
+                    value=plant["name"] or "",
+                    key=f"plant_edit_name_{plant_id}",
+                )
+                unit_code_edit = st.text_input(
+                    "Número da unidade consumidora (UC)",
+                    value=plant["unit_code"] or "",
+                    key=f"plant_edit_unit_code_{plant_id}",
+                )
+                distributor_edit = st.text_input(
+                    "Distribuidora",
+                    value=plant["distributor"] or "",
+                    key=f"plant_edit_distributor_{plant_id}",
+                )
+            with identity_right:
+                address_edit = st.text_input(
+                    "Endereço da usina",
+                    value=plant["address"] or "",
+                    key=f"plant_edit_address_{plant_id}",
+                )
+                connection_type_edit = st.text_input(
+                    "Tipo de ligação",
+                    value=plant["connection_type"] or "",
+                    placeholder="Ex.: Monofásica, bifásica, trifásica ou média tensão",
+                    key=f"plant_edit_connection_type_{plant_id}",
+                )
+                status = st.selectbox(
+                    "Status",
+                    statuses,
+                    index=statuses.index(plant["status"]) if plant["status"] in statuses else 0,
+                    key=f"plant_edit_status_{plant_id}",
+                )
+                commissioning_edit = st.date_input(
+                    "Data de comissionamento",
+                    value=date.fromisoformat(plant["commissioning_date"]) if plant["commissioning_date"] else None,
+                    key=f"plant_edit_commissioning_{plant_id}",
+                )
+
+            st.subheader("Dimensionamento e equipamentos", icon=":material/solar_power:")
+            technical_left, technical_right = st.columns(2)
+            with technical_left:
+                installed_edit = st.number_input(
+                    "Potência instalada (kWp)",
+                    min_value=0.0,
+                    value=float(plant["installed_kwp"] or 0),
+                    step=0.1,
+                    key=f"plant_edit_installed_{plant_id}",
+                )
+                expected_edit = st.number_input(
+                    "Geração esperada (kWh/mês)",
+                    min_value=0.0,
+                    value=float(plant["expected_monthly_kwh"] or 0),
+                    step=100.0,
+                    key=f"plant_edit_expected_{plant_id}",
+                )
+                inverter_edit = st.text_input(
+                    "Resumo dos inversores",
+                    value=plant["inverter"] or "",
+                    key=f"plant_edit_inverter_{plant_id}",
+                )
+                modules_edit = st.text_input(
+                    "Resumo dos módulos",
+                    value=plant["modules"] or "",
+                    key=f"plant_edit_modules_{plant_id}",
+                )
+            with technical_right:
+                warranty_edit = st.date_input(
+                    "Garantia geral até",
+                    value=date.fromisoformat(plant["warranty_expiry"]) if plant["warranty_expiry"] else None,
+                    key=f"plant_edit_warranty_{plant_id}",
+                )
+                next_cleaning_edit = st.date_input(
+                    "Próxima limpeza",
+                    value=date.fromisoformat(plant["next_cleaning_date"]) if plant["next_cleaning_date"] else None,
+                    key=f"plant_edit_next_cleaning_{plant_id}",
+                )
+                monitoring_edit = st.text_input(
+                    "Portal de monitoramento",
+                    value=plant["monitoring_url"] or "",
+                    key=f"plant_edit_monitoring_{plant_id}",
+                )
+
+            notes_edit = st.text_area(
+                "Observações operacionais",
+                value=plant["notes"] or "",
+                key=f"plant_edit_notes_{plant_id}",
+            )
+            submitted = st.form_submit_button(
+                "Salvar todos os dados",
+                type="primary",
+                icon=":material/save:",
+                key=f"plant_edit_submit_{plant_id}",
+            )
+        if submitted:
+            if not name_edit.strip():
+                st.error("Informe o nome da usina.")
+            else:
+                execute(
+                    """UPDATE plants
+                       SET client_id=?, name=?, unit_code=?, distributor=?, address=?, connection_type=?,
+                           installed_kwp=?, expected_monthly_kwh=?, commissioning_date=?, inverter=?, modules=?,
+                           monitoring_url=?, status=?, warranty_expiry=?, next_cleaning_date=?, notes=?
+                       WHERE id=?""",
+                    (
+                        c_map[client_edit],
+                        name_edit.strip(),
+                        unit_code_edit.strip(),
+                        distributor_edit.strip(),
+                        address_edit.strip(),
+                        connection_type_edit.strip(),
+                        installed_edit,
+                        expected_edit,
+                        commissioning_edit.isoformat() if commissioning_edit else None,
+                        inverter_edit.strip(),
+                        modules_edit.strip(),
+                        monitoring_edit.strip(),
+                        status,
+                        warranty_edit.isoformat() if warranty_edit else None,
+                        next_cleaning_edit.isoformat() if next_cleaning_edit else None,
+                        notes_edit.strip(),
+                        plant_id,
+                    ),
+                )
+                flash("Todos os dados da usina foram atualizados.")
                 st.rerun()
 
     render_delete_control(

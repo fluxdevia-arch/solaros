@@ -84,6 +84,10 @@ class ProviderProfile:
     secret_placeholder: str
     setup_steps: tuple[str, ...]
     documentation_url: str = ""
+    portal_url: str = ""
+    support_url: str = ""
+    authentication_method: str = "API oficial"
+    support_request: str = ""
     connector_active: bool = True
     activation_note: str = ""
 
@@ -252,6 +256,15 @@ PROVIDER_PROFILES = {
             "Confirme a conta instaladora e a região do AUXSOL Cloud.",
             "Solicite ao suporte AUXSOL a habilitação de acesso por API.",
             "Autorize as usinas da conta para o aplicativo da GRID.",
+        ),
+        portal_url="https://www.auxsolcloud.com/",
+        support_url="https://www.auxsol.com/pt/service-after-service-support.html",
+        authentication_method="A definir pela AUXSOL: login autorizado, token ou chave de API",
+        support_request=(
+            "Solicito a habilitação de integração da minha conta instaladora do AUXSOL Cloud com o "
+            "sistema GRID Engenharia. Preciso da documentação da API, endereço/base URL e região, "
+            "método de autenticação autorizado (login, OAuth ou chave de API), campos exigidos e "
+            "procedimento para liberar todas as usinas da conta."
         ),
         connector_active=False,
         activation_note="O conector depende da liberação oficial de API pela AUXSOL.",

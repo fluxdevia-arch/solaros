@@ -173,6 +173,10 @@ class MonitoringTests(unittest.TestCase):
         }.issubset(PROVIDER_CATALOG))
         active = [name for name in PROVIDER_CATALOG if PROVIDER_PROFILES[name].connector_active]
         self.assertEqual(active, SUPPORTED_PROVIDERS)
+        auxsol = PROVIDER_PROFILES["AUXSOL Cloud"]
+        self.assertIn("auxsolcloud.com", auxsol.portal_url)
+        self.assertIn("documentação da api", auxsol.support_request.lower())
+        self.assertFalse(auxsol.connector_active)
 
     def test_discovery_link_and_monthly_sync(self):
         from solar_crm.db import init_db, query_one
